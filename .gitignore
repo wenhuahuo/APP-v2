@@ -1,5 +1,5 @@
 # 数据集与中间产物
-dataset/
+/dataset/
 *.vtu
 *.vtp
 *.npy

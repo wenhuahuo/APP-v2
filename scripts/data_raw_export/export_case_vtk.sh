@@ -2,9 +2,8 @@
 # 集群端：把单个算例末态导出为 VTK 原始数据包，供本地组装数据集使用。
 #
 # 用法: export_case_vtk.sh <case-dir> <out-root>
-# 产物: <out-root>/<case>/{internal.vtu,hull.vtp,alpha.water.t0,force.*.dat,
-#                          KCS_Hull.stl.gz,case_manifest.json,kcs_reference.json,
-#                          log.foamToVTK}
+# 产物: <out-root>/<case>/{internal.vtu,hull.vtp,alpha.water.t0,KCS_Hull.stl.gz,
+#                          case_manifest.json,kcs_reference.json,log.foamToVTK}
 set -eo pipefail
 
 CASE=$(cd "$1" && pwd)
@@ -46,14 +45,6 @@ cp "$CASE/case_manifest.json" "$WORK/case_manifest.json"
 cp "$CASE/KCS_Hull.stl.gz" "$WORK/KCS_Hull.stl.gz"
 # 初始自由面直接取 setFields 写入的原始场文件，避免按 setFieldsDict 重建的近似
 cp "$CASE/0/alpha.water" "$WORK/alpha.water.t0"
-
-i=0
-for f in "$CASE"/postProcessing/forces/*/force.dat; do
-  seg=$(basename "$(dirname "$f")")
-  cp "$f" "$WORK/force.$seg.dat"
-  i=$((i + 1))
-done
-[[ $i -gt 0 ]] || { echo "未找到 force.dat" >&2; exit 4; }
 
 REF=$HOME/Documents/ShipMaster/openfoam/calm_water/reference/kcs_tokyo2015_case2_1.json
 [[ -f "$REF" ]] && cp "$REF" "$WORK/kcs_reference.json"
