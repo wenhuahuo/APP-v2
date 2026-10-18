@@ -31,7 +31,9 @@ for t in "$CASE"/[0-9]*; do
 done
 
 cd "$WORK"
-foamToVTK -latestTime -fields "(U p_rgh alpha.water)" -patches hull -no-point-data \
+# 单元中心用 OpenFOAM 自己写的 C 场：vtkCellCenters 对少数多面体单元给出错误中心
+postProcess -func writeCellCentres -latestTime > log.writeCellCentres 2>&1
+foamToVTK -latestTime -fields "(U p_rgh alpha.water C)" -patches hull -no-point-data \
   > log.foamToVTK 2>&1
 
 VDIR=$(find VTK -mindepth 1 -maxdepth 1 -type d | head -1)
