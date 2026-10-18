@@ -172,7 +172,7 @@ def update_index(dataset_root, meta):
         "Re": meta["Re"],
         "n_cells": meta["mesh"]["n_cells"],
         "n_flow_points": meta["flow_field"]["n_points"],
-        "n_hull_points": meta["mesh"]["n_hull_points"],
+        "n_hull_points": meta["mesh"]["n_hull_wetted_points"],
         "files": meta["files"],
     }
     index["n_entries"] = len(index["entries"])
