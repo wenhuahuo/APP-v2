@@ -1,0 +1,18 @@
+[project]
+name = "appsolver-v2"
+version = "0.1.0"
+description = "APPSolver-v2 船舶 CFD 深度学习数据集构建与代理模型开发"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=2.0",
+    "vtk>=9.3",
+    "matplotlib>=3.8",
+    "trimesh>=4.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

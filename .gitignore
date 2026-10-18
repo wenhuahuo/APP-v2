@@ -1,0 +1,16 @@
+# 数据集与中间产物
+dataset/
+*.vtu
+*.vtp
+*.npy
+*.npz
+vis/**/*.png
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# macOS
+.DS_Store
