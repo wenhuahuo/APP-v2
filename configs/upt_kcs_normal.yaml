@@ -1,0 +1,25 @@
+# UPT 基线（固定 128 个 latent）：KCS Fr=0.26 normal 网格条目既作训练集也作验证集（1.17 M 参数）
+# 基线不含 APP 的物理尺寸分词与查询解码器：整片点云直接进、同一批点直接出，
+# 训练超参与 APP 加宽主干一致。
+stats: dataset/stats.json
+model_type: upt
+model:
+  d_model: 168
+  nhead: 8
+  layers: 2
+  latents: 128
+  mlp_ratio: 4
+  dropout: 0.0
+train:
+  device: cuda
+  dataset_root: dataset
+  entries: [kcs_fr026_normal_mesh]
+  train_strides: [1, 2]
+  epochs: 100
+  steps_per_epoch: 24
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_queries: 4096
+  val_queries: 16384
+  lambda_hull: 1.0
+  seed: 0

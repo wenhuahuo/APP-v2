@@ -1,7 +1,7 @@
-"""按配置训练 APPSolver-v2。
+"""按配置训练模型（APP 主线或基线）。
 
 用法:
-    python3 scripts/train/train_appsolver_v2.py --config configs/appsolver_v2_kcs_normal.yaml
+    python3 scripts/train/train_model.py --config configs/appsolver_v2_kcs_normal_wide.yaml
 """
 
 import argparse
@@ -11,10 +11,10 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-for name in ("datapipe", "app", "model", "train"):
+for name in ("datapipe", "app", "baseline", "model", "train"):
     sys.path.insert(0, str(ROOT / "src" / name))
 
-from appsolver_v2 import APPSolverV2  # noqa: E402
+from build import build_model  # noqa: E402
 from normalize import Normalizer  # noqa: E402
 from trainer import Trainer  # noqa: E402
 
@@ -26,12 +26,12 @@ def main():
 
     config_path = Path(args.config)
     config = yaml.safe_load(config_path.read_text())
-    model = APPSolverV2(**config["model"])
+    model = build_model(config)
     normalizer = Normalizer.load(ROOT / config["stats"])
 
     trainer = Trainer(model, normalizer, config, ROOT / "output" / config_path.stem)
     parameters = sum(p.numel() for p in model.parameters())
-    print(f"{config_path.stem}: {parameters / 1e6:.2f} M 参数，"
+    print(f"{config_path.stem}: {config['model_type']} {parameters / 1e6:.3f} M 参数，"
           f"条目 {config['train']['entries']}")
     trainer.run()
 

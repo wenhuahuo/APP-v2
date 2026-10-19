@@ -1,5 +1,6 @@
 # APPSolver-v2 冒烟训练：KCS Fr=0.26 normal 网格条目既作训练集也作验证集
 stats: dataset/stats.json
+model_type: appsolver_v2
 
 model:
   flow_size_tiers: [[0.05, 0.02], [0.2, 0.05], [null, 0.15]]
