@@ -66,7 +66,9 @@ class APPSolverV2(nn.Module):
 
         tokens, weight, coords = self._pad_tokens(
             [self._tokenize(batch, i) for i in range(len(condition))])
-        memory = self.encoder(tokens, weight, coords, modulations[:split])
+        device = self.flow_head.weight.device
+        memory = self.encoder(tokens.to(device), weight.to(device), coords.to(device),
+                              modulations[:split])
 
         flow = self.flow_head(self._decode(flow_queries, self.flow_extra, memory, weight,
                                           coords, modulations[split:]))
@@ -94,21 +96,22 @@ class APPSolverV2(nn.Module):
                 torch.from_numpy(partition.areas), centres)
 
     def _tokenize(self, batch, i):
-        flow_mask = batch["flow_mask"][i]
-        flow_coords = batch["flow_coords"][i][flow_mask]
-        flow_weights = batch["flow_weight"][i][flow_mask]
-        flow_sdf = batch["flow_sdf"][i][flow_mask]
+        """分词在 CPU 上用 numpy 做（分区与积分），token 再搬到参数所在设备。"""
+        flow_mask = batch["flow_mask"][i].cpu()
+        flow_coords = batch["flow_coords"][i].cpu()[flow_mask]
+        flow_weights = batch["flow_weight"][i].cpu()[flow_mask]
+        flow_sdf = batch["flow_sdf"][i].cpu()[flow_mask]
         flow_features = torch.column_stack([flow_coords, flow_sdf])
         flow = self._domain_token(
             flow_features, flow_weights, tuple(batch["flow_extent"][i].tolist()),
             tiered_tolerance(flow_sdf.numpy(), self.flow_size_tiers),
             self.flow_input, 0, 1.0)
 
-        hull_mask = batch["hull_mask"][i]
-        hull_weights = batch["hull_weight"][i][hull_mask]
+        hull_mask = batch["hull_mask"][i].cpu()
+        hull_weights = batch["hull_weight"][i].cpu()[hull_mask]
         hull_features = torch.column_stack([
-            batch["hull_uv"][i][hull_mask], batch["hull_points"][i][hull_mask],
-            batch["hull_normals"][i][hull_mask],
+            batch["hull_uv"][i].cpu()[hull_mask], batch["hull_points"][i].cpu()[hull_mask],
+            batch["hull_normals"][i].cpu()[hull_mask],
         ])
         hull = self._domain_token(
             hull_features, hull_weights, HULL_EXTENT,
