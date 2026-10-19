@@ -76,8 +76,8 @@ def main():
     config_path = Path(args.config)
     config = yaml.safe_load(config_path.read_text())
     output_dir = ROOT / "output" / config_path.stem
-    checkpoint = torch.load(output_dir / "best.pt", weights_only=False)
     device = torch.device(config["train"]["device"])
+    checkpoint = torch.load(output_dir / "best.pt", weights_only=False, map_location=device)
     model = APPSolverV2(**config["model"]).to(device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
