@@ -40,6 +40,9 @@ def fake_batch():
         "hull_points": torch.rand(1, HULL_POINTS, 3),
         "hull_normals": torch.rand(1, HULL_POINTS, 3),
         "hull_mask": torch.ones(1, HULL_POINTS, dtype=torch.bool),
+        "flow_mask": torch.ones(1, nx, ny, dtype=torch.bool),
+        "flow_weight": torch.full((1, nx, ny), (x[1] - x[0]) * (y[1] - y[0])),
+        "hull_weight": torch.full((1, HULL_POINTS), 1.0 / HULL_POINTS),
     }
 
 
@@ -91,6 +94,25 @@ class BaselineForwardTest(unittest.TestCase):
             self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1), name)
             output["flow"].sum().backward()
             self.assertTrue(any(p.grad is not None for p in model.parameters()), name)
+
+
+class HybridForwardTest(unittest.TestCase):
+    """APP 分词 + OFormer 主干：输出与前缀查询点一致，参数全部有梯度。"""
+
+    def test_forward_and_gradients(self):
+        from appsolver_oformer import APPSolverOFormer
+
+        batch = fake_batch()
+        queries = batch["flow_coords"].reshape(-1, 2)[:QUERIES]
+        queries = torch.column_stack([queries, batch["flow_sdf"].reshape(-1)[:QUERIES]])[None]
+        model = APPSolverOFormer(flow_size_tiers=[[0.3, 0.2], [None, 0.4]], hull_size=0.3,
+                                 d_model=32, nhead=4, encoder_layers=1, decoder_layers=1,
+                                 mlp_ratio=2, propagator_layers=1)
+        output = model(batch, queries)
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERIES, 5))
+        self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1))
+        (output["flow"].sum() + output["hull"].sum()).backward()
+        self.assertTrue(all(p.grad is not None for p in model.parameters()))
 
 
 if __name__ == "__main__":

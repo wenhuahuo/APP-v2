@@ -16,16 +16,12 @@ import torch
 import torch.nn as nn
 
 from encoder import Encoder, FiLM
-from patch_integrate import integrate
 from positional import FourierFeatures
-from quadtree import build_partition, tiered_tolerance
 from query_decoder import QueryBasis, QueryDecoder
+from tokenizer import flow_tokens, hull_tokens
 
 FLOW_FEATURES = ("x", "y", "sdf")
 HULL_FEATURES = ("u", "v", "x", "y", "z", "nx", "ny", "nz")
-HULL_EXTENT = (0.0, 0.0, 1.0, 1.0)
-
-
 class APPSolverV2(nn.Module):
     def __init__(self, flow_size_tiers, hull_size, d_model=64, nhead=4,
                  encoder_layers=2, decoder_layers=2, mlp_ratio=4.0, dropout=0.0,
@@ -83,40 +79,21 @@ class APPSolverV2(nn.Module):
             return 0.0
         return self.position(self.fourier(centres))
 
-    def _domain_token(self, features, weights, extent, tolerance, projection, domain_id, scale):
-        partition = build_partition(features[:, :2].numpy(), weights.numpy(), extent, tolerance,
-                                    scale=scale, max_level=self.max_level)
-        order = torch.from_numpy(partition.order)
-        starts = torch.from_numpy(partition.starts)
-        tokens, _, centres = integrate(features[order], weights[order], starts)
+    def _domain_token(self, patches, projection, domain_id):
+        tokens, areas, centres = patches
         device = projection.weight.device
         tokens = projection(tokens.to(device))
         centres = centres.to(device)
         marker = torch.full((len(tokens),), domain_id, dtype=torch.long, device=device)
         return (tokens + self.domain(marker) + self._position(centres),
-                torch.from_numpy(partition.areas).to(device), centres)
+                areas.to(device), centres)
 
     def _tokenize(self, batch, i):
         """分词在 CPU 上用 numpy 做（分区与积分），token 再搬到参数所在设备。"""
-        flow_mask = batch["flow_mask"][i].cpu()
-        flow_coords = batch["flow_coords"][i].cpu()[flow_mask]
-        flow_weights = batch["flow_weight"][i].cpu()[flow_mask]
-        flow_sdf = batch["flow_sdf"][i].cpu()[flow_mask]
-        flow_features = torch.column_stack([flow_coords, flow_sdf])
-        flow = self._domain_token(
-            flow_features, flow_weights, tuple(batch["flow_extent"][i].tolist()),
-            tiered_tolerance(flow_sdf.numpy(), self.flow_size_tiers),
-            self.flow_input, 0, 1.0)
-
-        hull_mask = batch["hull_mask"][i].cpu()
-        hull_weights = batch["hull_weight"][i].cpu()[hull_mask]
-        hull_features = torch.column_stack([
-            batch["hull_uv"][i].cpu()[hull_mask], batch["hull_points"][i].cpu()[hull_mask],
-            batch["hull_normals"][i].cpu()[hull_mask],
-        ])
-        hull = self._domain_token(
-            hull_features, hull_weights, HULL_EXTENT,
-            np.full(len(hull_weights), self.hull_size), self.hull_input, 1, None)
+        flow = self._domain_token(flow_tokens(batch, i, self.flow_size_tiers, self.max_level),
+                                  self.flow_input, 0)
+        hull = self._domain_token(hull_tokens(batch, i, self.hull_size, self.max_level),
+                                  self.hull_input, 1)
         return tuple(torch.cat([flow[k], hull[k]]) for k in range(3))
 
     @staticmethod
