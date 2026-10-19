@@ -8,7 +8,7 @@ padding 到批内最大点数，padding 位置权重为 0 并由 `hull_mask` 标
 import torch
 
 STACKED_KEYS = (
-    "flow_coords", "flow_sdf", "flow_target", "flow_weight", "flow_mask",
+    "flow_coords", "flow_extent", "flow_sdf", "flow_target", "flow_weight", "flow_mask",
     "condition", "scale",
 )
 PADDED_KEYS = ("hull_points", "hull_uv", "hull_normals", "hull_pressure", "hull_weight")

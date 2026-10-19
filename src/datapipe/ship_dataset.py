@@ -44,6 +44,8 @@ class ShipDataset(Dataset):
 
         xs = self.origin[0] + self.spacing * np.arange(self.nx)
         ys = self.origin[1] + self.spacing * np.arange(self.ny)
+        # 格点域范围与 stride 无关，APP 分区要用它做参数域包围盒
+        self.extent = (xs[0], ys[0], xs[-1], ys[-1])
         grid_x, grid_y = np.meshgrid(xs, ys, indexing="ij")
         self.flow_coords = _tensor(np.stack([grid_x, grid_y], axis=-1)[::stride, ::stride])
 
@@ -91,6 +93,7 @@ class ShipDataset(Dataset):
         mask = weight > 0.0
         return {
             "flow_coords": self.flow_coords,
+            "flow_extent": _tensor(self.extent),
             "flow_sdf": _tensor(sdf[::stride, ::stride]),
             "flow_target": _tensor(target[::stride, ::stride]),
             "flow_weight": _tensor(weight[::stride, ::stride] * stride ** 2),

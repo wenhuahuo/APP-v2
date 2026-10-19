@@ -15,6 +15,7 @@ from collate import collate_samples  # noqa: E402
 def fake_sample(hull_points):
     return {
         "flow_coords": torch.zeros(3, 2, 2),
+        "flow_extent": torch.tensor([0.0, 0.0, 1.0, 1.0]),
         "flow_sdf": torch.zeros(3, 2),
         "flow_target": torch.zeros(3, 2, 5),
         "flow_weight": torch.ones(3, 2),
