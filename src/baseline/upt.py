@@ -69,16 +69,17 @@ class UPTBaseline(nn.Module):
         self.hull_head = nn.Linear(int(mlp_ratio * d_model), hull_channels)
 
     def _points(self, features, projection, bias):
+        # 查询与编码共用同一个逐点嵌入：解码端因此能拿到该点自身的坐标与几何特征，
+        # 与参考实现 `RansPerceiver_Decoder` 把 query_fx 拼进 query 的做法一致。
         coords = features[..., :2]
         points = self.position(coords) + projection(features) + bias
         latents = self.latent.expand(points.shape[0], -1, -1)
         for block in self.blocks:
             latents = block(latents, points)
         latents = self.norm(latents)
-        query = self.position(coords) + bias
-        decoded = self.decode(query, self.decode_key(latents), self.decode_key(latents),
+        decoded = self.decode(points, self.decode_key(latents), self.decode_key(latents),
                               need_weights=False)[0]
-        return self.head(decoded + query)
+        return self.head(decoded + points)
 
     def forward(self, batch, flow_queries):
         """输入整片点云，输出查询点处的场值；批大小固定为 1。"""
