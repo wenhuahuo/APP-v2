@@ -1,0 +1,29 @@
+# APPSolver-v2 加宽主干：KCS Fr=0.26 normal 网格条目既作训练集也作验证集（1.24 M 参数）
+stats: dataset/stats.json
+
+model:
+  flow_size_tiers: [[0.05, 0.02], [0.2, 0.05], [null, 0.15]]
+  hull_size: 0.05
+  d_model: 128
+  nhead: 8
+  encoder_layers: 3
+  decoder_layers: 3
+  positional: fourier        # fourier | rope
+  query_basis: siren         # siren | fourier | linear
+  fourier_features: 32
+  fourier_scale: 4.0
+  dropout: 0.0
+
+train:
+  device: cuda
+  dataset_root: dataset
+  entries: [kcs_fr026_normal_mesh]
+  train_strides: [1, 2]
+  epochs: 100
+  steps_per_epoch: 24
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_queries: 4096
+  val_queries: 16384
+  lambda_hull: 1.0
+  seed: 0
