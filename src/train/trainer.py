@@ -3,6 +3,7 @@
 自由液面域有十万量级查询点，每步随机抽一部分计算损失；查询是输出函数上的采样，
 抽子集不改变模型的定义。验证集用固定查询点集，便于跨 epoch 比较。
 `train_strides` 给出训练时的查询密度档位（1 = 标签点集原密度），每步随机取一档。
+计算设备由配置的 `device` 显式给出（`cpu` / `cuda`），不做自动回退。
 """
 
 from pathlib import Path
@@ -24,6 +25,8 @@ class Trainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         config = self.config
+        self.device = torch.device(config["device"])
+        self.model.to(self.device)
         self.datasets = {stride: ShipDataset(config["dataset_root"], config["entries"],
                                              stride=stride)
                          for stride in config["train_strides"]}
@@ -44,16 +47,16 @@ class Trainer:
         return torch.stack([flat // ny, flat % ny], dim=-1)
 
     def _forward(self, sample, index):
-        batch = collate_samples([sample])
+        batch = {key: value.to(self.device) for key, value in collate_samples([sample]).items()}
         queries = torch.column_stack([
             sample["flow_coords"][index[:, 0], index[:, 1]],
             sample["flow_sdf"][index[:, 0], index[:, 1]],
-        ])[None]
+        ])[None].to(self.device)
         output = self.model(batch, queries)
         flow_target = self.normalizer.flow(
-            sample["flow_target"][index[:, 0], index[:, 1]])[None]
-        flow_weight = sample["flow_weight"][index[:, 0], index[:, 1]][None]
-        hull_target = self.normalizer.hull(sample["hull_pressure"])[:, None][None]
+            sample["flow_target"][index[:, 0], index[:, 1]])[None].to(self.device)
+        flow_weight = sample["flow_weight"][index[:, 0], index[:, 1]][None].to(self.device)
+        hull_target = self.normalizer.hull(sample["hull_pressure"])[:, None][None].to(self.device)
         return output, (output["flow"][0], flow_target[0], flow_weight[0]), \
             (output["hull"][0], hull_target[0], batch["hull_weight"][0])
 
