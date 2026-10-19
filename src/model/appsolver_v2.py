@@ -66,9 +66,7 @@ class APPSolverV2(nn.Module):
 
         tokens, weight, coords = self._pad_tokens(
             [self._tokenize(batch, i) for i in range(len(condition))])
-        device = self.flow_head.weight.device
-        memory = self.encoder(tokens.to(device), weight.to(device), coords.to(device),
-                              modulations[:split])
+        memory = self.encoder(tokens, weight, coords, modulations[:split])
 
         flow = self.flow_head(self._decode(flow_queries, self.flow_extra, memory, weight,
                                           coords, modulations[split:]))
@@ -91,9 +89,12 @@ class APPSolverV2(nn.Module):
         order = torch.from_numpy(partition.order)
         starts = torch.from_numpy(partition.starts)
         tokens, _, centres = integrate(features[order], weights[order], starts)
-        marker = torch.full((len(tokens),), domain_id, dtype=torch.long)
-        return (projection(tokens) + self.domain(marker) + self._position(centres),
-                torch.from_numpy(partition.areas), centres)
+        device = projection.weight.device
+        tokens = projection(tokens.to(device))
+        centres = centres.to(device)
+        marker = torch.full((len(tokens),), domain_id, dtype=torch.long, device=device)
+        return (tokens + self.domain(marker) + self._position(centres),
+                torch.from_numpy(partition.areas).to(device), centres)
 
     def _tokenize(self, batch, i):
         """分词在 CPU 上用 numpy 做（分区与积分），token 再搬到参数所在设备。"""
