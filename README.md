@@ -23,7 +23,10 @@ bash scripts/dataset_build/build_dataset.sh kcs_normal_mesh_25s kcs_sparse_mesh_
 # 4. 校验条目
 python3 src/dataset/validate_entry.py
 
-# 5. 可视化
+# 5. 拟合归一化统计量（只含训练集条目）
+python3 scripts/datapipe/build_stats.py --entries kcs_fr026_normal_mesh
+
+# 6. 可视化
 python3 vis/kcs_flow_and_press/plot_flow_and_pressure.py
 python3 vis/kcs_hull_uv/plot_hull_uv.py
 python3 vis/kcs_flow_sdf/plot_flow_sdf.py
@@ -35,6 +38,12 @@ python3 vis/kcs_flow_sdf/plot_flow_sdf.py
 | --- | --- | ---: | ---: | ---: | ---: |
 | `kcs_fr026_normal_mesh` | `kcs_normal_mesh_25s` | 1,261,936 | 103,079 | 17,390 | 11 MB |
 | `kcs_fr026_sparse_mesh` | `kcs_sparse_mesh_25s` | 409,871 | 102,921 | 7,977 | 7 MB |
+
+## 数据加载
+
+`src/datapipe/` 把条目加载成 torch 张量：流场散点回填成 (`nx`, `ny`) 稠密张量，
+目标无量纲化后按求积权重做逐通道标准化；查询点集密度用 `stride` 抽样，权重乘以
+`stride²`。CFD 只有 normal 一档网格，分辨率只体现在查询点集密度上。
 
 ## 依赖
 
