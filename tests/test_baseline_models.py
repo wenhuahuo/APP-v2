@@ -13,6 +13,7 @@ for name in ("datapipe", "app", "baseline", "model", "eval"):
 
 from app_v1 import APPSolverV1Baseline, point_patches  # noqa: E402
 from gnot import GNOTBaseline  # noqa: E402
+from oformer import OFormerBaseline  # noqa: E402
 from point_cloud import lattice_index  # noqa: E402
 from transolver import TransolverBaseline  # noqa: E402
 from upt import UPTBaseline  # noqa: E402
@@ -81,6 +82,8 @@ class BaselineForwardTest(unittest.TestCase):
             "upt": UPTBaseline(d_model=24, nhead=4, layers=1, latents=16, mlp_ratio=2),
             "appsolver_v1": APPSolverV1Baseline(patch_size=8, d_model=24, nhead=4, layers=1,
                                                 mlp_ratio=2, max_patches=64),
+            "oformer": OFormerBaseline(d_model=32, nhead=4, encoder_layers=1, decoder_layers=1,
+                                      mlp_ratio=2, propagator_layers=1),
         }
         for name, model in models.items():
             output = model(batch, queries)

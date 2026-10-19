@@ -3,6 +3,7 @@
 from app_v1 import APPSolverV1Baseline
 from appsolver_v2 import APPSolverV2
 from gnot import GNOTBaseline
+from oformer import OFormerBaseline
 from transolver import TransolverBaseline
 from upt import UPTBaseline
 
@@ -12,6 +13,7 @@ MODELS = {
     "gnot": GNOTBaseline,
     "upt": UPTBaseline,
     "transolver": TransolverBaseline,
+    "oformer": OFormerBaseline,
 }
 
 
