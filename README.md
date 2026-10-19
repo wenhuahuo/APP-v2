@@ -26,7 +26,10 @@ python3 src/dataset/validate_entry.py
 # 5. 拟合归一化统计量（只含训练集条目）
 python3 scripts/datapipe/build_stats.py --entries kcs_fr026_normal_mesh
 
-# 6. 可视化
+# 6. 训练（当前只有一条条目，训练集同时作验证集）
+python3 scripts/train/train_appsolver_v2.py --config configs/appsolver_v2_kcs_normal.yaml
+
+# 7. 可视化
 python3 vis/kcs_flow_and_press/plot_flow_and_pressure.py
 python3 vis/kcs_hull_uv/plot_hull_uv.py
 python3 vis/kcs_flow_sdf/plot_flow_sdf.py
@@ -44,6 +47,13 @@ python3 vis/kcs_flow_sdf/plot_flow_sdf.py
 `src/datapipe/` 把条目加载成 torch 张量：流场散点回填成 (`nx`, `ny`) 稠密张量，
 目标无量纲化后按求积权重做逐通道标准化；查询点集密度用 `stride` 抽样，权重乘以
 `stride²`。CFD 只有 normal 一档网格，分辨率只体现在查询点集密度上。
+
+## 模型
+
+`src/app/` 按物理尺寸把点集划成 patch，token 取 patch 内的求积加权平均；
+`src/model/` 是共享编码器 + 查询解码器：位置编码可选 Fourier / RoPE，注意力带
+求积权重，工况参数用逐层 FiLM 注入。输出域两个：自由液面 5 通道、船面压力 1 通道，
+查询点任意给。
 
 ## 依赖
 
