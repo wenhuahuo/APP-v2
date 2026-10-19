@@ -80,7 +80,7 @@ class APPSolverV1Baseline(nn.Module):
                                              layers, mlp_ratio, max_patches, dropout)
 
     def _points(self, features, patches, bias):
-        coords = features[..., :2].numpy()[0]
+        coords = features[..., :2].cpu().numpy()[0]
         index, mask = point_patches(coords, np.ones(len(coords), dtype=bool), self.patch_size)
         index = torch.from_numpy(index).to(features.device)
         mask = torch.from_numpy(mask).to(features.device)
