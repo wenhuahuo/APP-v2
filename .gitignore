@@ -1,5 +1,6 @@
 # 数据集与中间产物
 /dataset/
+/checkpoints/
 *.vtu
 *.vtp
 *.npy
@@ -12,5 +13,6 @@ __pycache__/
 .venv/
 *.egg-info/
 
-# macOS
+# 编辑器与系统
+.vscode/
 .DS_Store
