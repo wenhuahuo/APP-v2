@@ -75,7 +75,7 @@ class Trainer:
             self.optimizer.zero_grad()
             losses["total"].backward()
             self.optimizer.step()
-            total += float(losses["total"])
+            total += losses["total"].item()
         return total / self.config["steps_per_epoch"]
 
     @torch.no_grad()
