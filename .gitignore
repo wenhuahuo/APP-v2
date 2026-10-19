@@ -1,6 +1,7 @@
 # 数据集与中间产物
 /dataset/
-/checkpoints/
+/output/
+logs/
 *.vtu
 *.vtp
 *.npy

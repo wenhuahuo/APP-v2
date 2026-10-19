@@ -29,7 +29,7 @@ def main():
     model = APPSolverV2(**config["model"])
     normalizer = Normalizer.load(ROOT / config["stats"])
 
-    trainer = Trainer(model, normalizer, config, ROOT / "checkpoints" / config_path.stem)
+    trainer = Trainer(model, normalizer, config, ROOT / "output" / config_path.stem)
     parameters = sum(p.numel() for p in model.parameters())
     print(f"{config_path.stem}: {parameters / 1e6:.2f} M 参数，"
           f"条目 {config['train']['entries']}")
