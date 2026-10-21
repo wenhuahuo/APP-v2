@@ -65,7 +65,8 @@ def validate(dataset_root, entry_id):
         problems.append(f"船体域含设计吃水以上的点: max z = {hull_points[:, 2].max():.4f} > T")
     wetted_area = arrays["hull_quad_weights"].sum()
     reference = 0.5 * meta["S0"]
-    if abs(wetted_area / reference - 1.0) > WETTED_AREA_TOLERANCE:
+    area_ok = abs(wetted_area / reference - 1.0) <= WETTED_AREA_TOLERANCE
+    if meta["S0_source"] == "reference" and not area_ok:
         problems.append(f"湿表面积 {wetted_area:.4f} m² 与 S0/2 = {reference:.4f} m² 偏差超 "
                         f"{WETTED_AREA_TOLERANCE:.0%}")
 

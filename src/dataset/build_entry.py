@@ -28,36 +28,69 @@ FIELDS = ("U", "p_rgh", "alpha.water")
 FLOW_BOX = {"x_over_Lpp": (-1.5, 2.0), "y_over_Lpp": (-0.75, 0.0), "spacing_over_Lpp": 0.005}
 
 
-def entry_identity(manifest):
-    """从算例名与傅汝德数生成条目 id：<船型>_fr<三位整数>_<网格档位>。"""
+def case_parameters(bundle):
+    """读出组装所需的船型、几何与流体参数。
+
+    批量船型的 manifest 直接给 `geometry` 与 `condition`；KCS 的 manifest 只有工况，
+    几何与流体在 `kcs_reference.json` 里（它同时是湿表面积 S0 的唯一来源）。
+    manifest 的 `run` 一律写作 `<船型>_fr<三位整数>_<网格档位>_<物理时长>`。
+    """
+    manifest = json.loads((bundle / "case_manifest.json").read_text())
+    if "geometry" in manifest:
+        geometry, condition = manifest["geometry"], manifest["condition"]
+        return {
+            "run": manifest["run"],
+            "hull": manifest["hull"],
+            "mesh_level": manifest["mesh_level"],
+            "Fr": condition["Fr"],
+            "Re": condition["Re"],
+            "U_inf": condition["U_m_s"],
+            "Lpp": geometry["L_ref_m"],
+            "T": geometry["T_m"],
+            "S0": None,
+            "rho": condition["rho"],
+            "nu": condition["nu"],
+            "scale": manifest["mesh_scale_to_kcs"],
+        }
+    reference = json.loads((bundle / "kcs_reference.json").read_text())
     parts = manifest["run"].split("_")
-    if len(parts) < 3:
-        raise ValueError(f"算例名 {manifest['run']} 不含 <船型>_<网格档位>_<时长> 结构")
-    hull = parts[0]
-    mesh_level = "_".join(parts[1:-1])
-    fr_code = round(manifest["froude"] * 100)
-    return f"{hull}_fr{fr_code:03d}_{mesh_level}", hull, mesh_level
+    return {
+        "run": manifest["run"],
+        "hull": parts[0],
+        "mesh_level": "_".join(parts[1:-1]),
+        "Fr": manifest["froude"],
+        "Re": manifest["speed"]["Re"],
+        "U_inf": manifest["speed"]["U_m_s"],
+        "Lpp": reference["geometry"]["Lpp_m"],
+        "T": reference["geometry"]["T_m"],
+        "S0": reference["geometry"]["S0_with_rudder_m2"],
+        "rho": reference["fluid"]["rho_kg_m3"],
+        "nu": reference["fluid"]["nu_m2_s"],
+        "scale": reference["geometry"]["scale_lambda"],
+    }
+
+
+def entry_identity(parameters):
+    """条目 id：<船型>_fr<三位整数>_<网格档位>。"""
+    fr_code = round(parameters["Fr"] * 100)
+    return f"{parameters['hull']}_fr{fr_code:03d}_{parameters['mesh_level']}"
 
 
 def build_entry(bundle, dataset_root, box=FLOW_BOX):
     bundle = Path(bundle)
     dataset_root = Path(dataset_root)
-    manifest = json.loads((bundle / "case_manifest.json").read_text())
-    reference = json.loads((bundle / "kcs_reference.json").read_text())
-
-    entry_id, hull, mesh_level = entry_identity(manifest)
+    parameters = case_parameters(bundle)
+    entry_id = entry_identity(parameters)
     out = dataset_root / entry_id
     out.mkdir(parents=True, exist_ok=True)
 
     internal = read_internal(bundle / "internal.vtu", FIELDS)
     hull_points, hull_offsets, hull_faces, patch_fields = read_patch(bundle / "hull.vtp", ("p_rgh",))
 
-    geometry = reference["geometry"]
-    fluid = reference["fluid"]
-    speed = manifest["speed"]
-    lpp = geometry["Lpp_m"]
-    draft = geometry["T_m"]
-    s0 = geometry["S0_with_rudder_m2"]
+    lpp = parameters["Lpp"]
+    draft = parameters["T"]
+    # 批量船型没有参考 S0，用船体网格自身的水线以下顶点面积给出名义值
+    s0 = parameters["S0"]
 
     alpha = internal["fields"]["alpha.water"].astype(np.float64)
     # interFoam 的 alpha 有界性允许 1e-6 级过冲，这里只拦明显越界
@@ -109,18 +142,19 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
 
     meta = {
         "entry_id": entry_id,
-        "source_case": manifest["run"],
-        "hull": hull,
-        "mesh_level": mesh_level,
-        "Fr": manifest["froude"],
-        "Re": speed["Re"],
-        "U_inf": speed["U_m_s"],
-        "rho": fluid["rho_kg_m3"],
-        "nu": fluid["nu_m2_s"],
-        "scale": geometry["scale_lambda"],
+        "source_case": parameters["run"],
+        "hull": parameters["hull"],
+        "mesh_level": parameters["mesh_level"],
+        "Fr": parameters["Fr"],
+        "Re": parameters["Re"],
+        "U_inf": parameters["U_inf"],
+        "rho": parameters["rho"],
+        "nu": parameters["nu"],
+        "scale": parameters["scale"],
         "Lpp": lpp,
         "T": draft,
-        "S0": s0,
+        "S0": float(2 * arrays["hull_quad_weights"].sum()) if s0 is None else s0,
+        "S0_source": "mesh_wetted_area" if s0 is None else "reference",
         "attitude": {"mode": "fixed_design_draught", "sinkage_m": 0.0, "trim_deg": 0.0},
          "mesh": {
             "n_cells": int(len(alpha)),
