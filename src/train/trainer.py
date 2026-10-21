@@ -1,7 +1,8 @@
 """训练循环：查询点集随机子采样、两域联合损失、按验证损失选 checkpoint。
 
 自由液面域有十万量级查询点，每步随机抽一部分计算损失；查询是输出函数上的采样，
-抽子集不改变模型的定义。验证集用固定查询点集，便于跨 epoch 比较。
+抽子集不改变模型的定义。验证用的是独立条目（`train.val_entries`），固定查询点集，
+便于跨 epoch 比较。
 `train_strides` 给出训练时的查询密度档位（1 = 标签点集原密度），每步随机取一档。
 计算设备由配置的 `device` 显式给出（`cpu` / `cuda`），不做自动回退。
 """
@@ -30,11 +31,14 @@ class Trainer:
         self.datasets = {stride: ShipDataset(config["dataset_root"], config["entries"],
                                              stride=stride)
                          for stride in config["train_strides"]}
+        self.validation = {stride: ShipDataset(config["dataset_root"], config["val_entries"],
+                                               stride=stride)
+                           for stride in config["train_strides"]}
         self.generator = torch.Generator().manual_seed(config["seed"])
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=config["learning_rate"],
             weight_decay=config["weight_decay"])
-        validation = self.datasets[config["train_strides"][0]]
+        validation = self.validation[config["train_strides"][0]]
         self.val_queries = self._sample_queries(config["val_queries"],
                                                 torch.Generator().manual_seed(config["seed"]),
                                                 validation)
@@ -81,7 +85,7 @@ class Trainer:
     @torch.no_grad()
     def evaluate(self):
         self.model.eval()
-        dataset = self.datasets[self.config["train_strides"][0]]
+        dataset = self.validation[self.config["train_strides"][0]]
         totals = {"flow": 0.0, "hull": 0.0}
         for i in range(len(dataset)):
             _, flow, hull = self._forward(dataset[i], self.val_queries)
