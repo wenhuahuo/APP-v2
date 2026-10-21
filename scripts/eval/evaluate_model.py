@@ -32,13 +32,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
     parser.add_argument("--strides", type=int, nargs="+", default=list(STRIDES))
+    parser.add_argument("--checkpoint", default="best.pt", help="best.pt 或 last.pt")
     args = parser.parse_args()
 
     config_path = Path(args.config)
     config = yaml.safe_load(config_path.read_text())
     output_dir = ROOT / "output" / config_path.stem
     device = torch.device(config["train"]["device"])
-    checkpoint = torch.load(output_dir / "best.pt", weights_only=False, map_location=device)
+    checkpoint = torch.load(output_dir / args.checkpoint, weights_only=False, map_location=device)
     model = build_model(config).to(device)
     model.load_state_dict(checkpoint["model"])
     model.eval()
@@ -50,7 +51,8 @@ def main():
         "config": str(config_path),
         "model_type": config["model_type"],
         "parameters": sum(p.numel() for p in model.parameters()),
-        "best_epoch": checkpoint["epoch"],
+        "checkpoint": args.checkpoint,
+        "checkpoint_epoch": checkpoint["epoch"],
         "train_strides": list(train["train_strides"]),
         "tasks": splits,
         "strides": {split: density_sweep(model, normalizer, ROOT / train["dataset_root"],
@@ -58,10 +60,10 @@ def main():
                     for split, entries in splits.items()},
     }
 
-    (output_dir / "metrics.json").write_text(
-        json.dumps(results, indent=2, ensure_ascii=False) + "\n")
-    print(f"{config['model_type']}，best epoch {checkpoint['epoch']}，"
-          f"指标写入 {output_dir / 'metrics.json'}")
+    metrics_path = output_dir / f"metrics_{Path(args.checkpoint).stem}.json"
+    metrics_path.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n")
+    print(f"{config['model_type']}，{args.checkpoint} epoch {checkpoint['epoch']}，"
+          f"指标写入 {metrics_path}")
     for split, entries in splits.items():
         print(f"\n{split}（{len(entries)} 个条目）")
         for entry_id in entries:

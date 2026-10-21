@@ -105,8 +105,12 @@ class Trainer:
                             **{key: float(value) for key, value in metrics.items()}})
             print(f"epoch {epoch:3d}  train {train_loss:.5f}  "
                   f"val flow {float(metrics['flow']):.5f}  val hull {float(metrics['hull']):.5f}")
+            # 两条选择规则都留档：best.pt 按验证损失选（早停），last.pt 是最后一轮。
+            # 训练集条目很少时验证损失往往在最初几轮最低，只看 best.pt 会报成欠训练。
+            checkpoint = {"model": self.model.state_dict(), "config": self.full_config,
+                          "epoch": epoch}
+            torch.save(checkpoint, self.output_dir / "last.pt")
             if validation < best:
                 best = validation
-                torch.save({"model": self.model.state_dict(), "config": self.full_config,
-                            "epoch": epoch}, self.output_dir / "best.pt")
+                torch.save(checkpoint, self.output_dir / "best.pt")
         return history
