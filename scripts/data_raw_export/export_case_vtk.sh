@@ -1,16 +1,19 @@
 #!/bin/bash
 # 集群端：把单个算例末态导出为 VTK 原始数据包，供本地组装数据集使用。
 #
-# 用法: export_case_vtk.sh <case-dir> <out-root>
+# 用法: export_case_vtk.sh <case-dir> <out-root> [time]
 # 产物: <out-root>/<case>/{internal.vtu,hull.vtp,KCS_Hull.stl.gz,
 #                          case_manifest.json,kcs_reference.json,log.foamToVTK}
 #
-# 只导出末态体场与 hull patch：二维自由液面由 alpha.water = 0.5 等值面重建，
+# 只导出体场与 hull patch：二维自由液面由 alpha.water = 0.5 等值面重建，
 # 初始自由面在设计吃水下恒为平面，不需要导出 0/alpha.water。
+# 不给 time 时导出最新时刻；给 time 时导出该物理时刻（顶层缺该时刻要先 reconstructPar）。
 set -eo pipefail
 
 CASE=$(cd "$1" && pwd)
 OUT=$2
+VTK_TIME=${3:+-time $3}
+VTK_TIME=${VTK_TIME:--latestTime}
 NAME=$(basename "$CASE")
 WORK=$OUT/$NAME
 
@@ -33,7 +36,7 @@ for t in "$CASE"/[0-9]*; do
 done
 
 cd "$WORK"
-foamToVTK -latestTime -fields "(U p_rgh alpha.water)" -patches hull -no-point-data \
+foamToVTK $VTK_TIME -fields "(U p_rgh alpha.water)" -patches hull -no-point-data \
   > log.foamToVTK 2>&1
 
 VDIR=$(find VTK -mindepth 1 -maxdepth 1 -type d | head -1)
