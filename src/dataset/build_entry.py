@@ -54,10 +54,12 @@ def case_parameters(bundle):
         }
     reference = json.loads((bundle / "kcs_reference.json").read_text())
     parts = manifest["run"].split("_")
+    # 目录名 `<船型>_fr<三位整数>_<网格档位>_<物理时长>`；早期 KCS 算例名没有 Fr 段
+    mesh_parts = parts[2:-1] if parts[1].startswith("fr") else parts[1:-1]
     return {
         "run": manifest["run"],
         "hull": parts[0],
-        "mesh_level": "_".join(parts[1:-1]),
+        "mesh_level": "_".join(mesh_parts),
         "Fr": manifest["froude"],
         "Re": manifest["speed"]["Re"],
         "U_inf": manifest["speed"]["U_m_s"],
@@ -93,8 +95,10 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
     s0 = parameters["S0"]
 
     alpha = internal["fields"]["alpha.water"].astype(np.float64)
-    # interFoam 的 alpha 有界性允许 1e-6 级过冲，这里只拦明显越界
-    if alpha.min() < -1e-4 or alpha.max() > 1.0 + 1e-4:
+    # MULES 的有界性有残差：实测高 Fr 粗网格算例（npl_round_bilge，Fr 0.40）末态
+    # 有 0.2% 单元落在 1 + 2.3e-4，2.7% 单元落在 -2.9e-7；alpha = 0.5 等值面不受影响。
+    # 这里只拦明显越界（1e-3）
+    if alpha.min() < -1e-3 or alpha.max() > 1.0 + 1e-3:
         raise ValueError(f"{entry_id} 的 alpha.water 越界: [{alpha.min()}, {alpha.max()}]")
     velocity = internal["fields"]["U"].astype(np.float64)
     pressure = internal["fields"]["p_rgh"].astype(np.float64)

@@ -46,12 +46,17 @@ cp "$CASE/case_manifest.json" "$WORK/case_manifest.json"
 
 # 船体 STL 名字按船型命名（`KCS_Hull.stl.gz`、`dtc_Hull.stl.gz` …），从 manifest 读，
 # 不硬编码；KCS manifest 用 `stl_gz`，批量船型用 `geometry.stl`。
+# 批量船型给相对文件名，KCS 的 manifest 给绝对路径，两种都要支持
 STL=$(python3 -c '
 import json, sys
 manifest = json.load(open(sys.argv[1]))
 print(manifest.get("stl_gz") or manifest["geometry"]["stl"])
 ' "$CASE/case_manifest.json")
-cp "$CASE/$STL" "$WORK/$STL"
+if [[ "$STL" = /* ]]; then
+  cp "$STL" "$WORK/$(basename "$STL")"
+else
+  cp "$CASE/$STL" "$WORK/$STL"
+fi
 
 # 只有 KCS 有参考几何（Lpp/T/S0/rho/nu）；其余船型的这些量在 manifest 里
 REF=$HOME/Documents/ShipMaster/openfoam/calm_water/reference/kcs_tokyo2015_case2_1.json
