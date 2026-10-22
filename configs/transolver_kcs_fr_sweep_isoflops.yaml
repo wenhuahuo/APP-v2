@@ -1,0 +1,34 @@
+# transolver：等计算量（iso-FLOPs）对照，前向 238.8 GFLOPs、0.932 M 参数
+# KCS 单船型 6 个 Fr，训练 kcs_fr026/031/036/047/052_normal_mesh，验证 kcs_fr042（Fr=0.416）
+# 与 transolver_kcs_fr_sweep 的唯一差别是容量超参（对齐到 APP 主线的 248 G）与 50 epoch
+stats: dataset/stats_kcs_fr_sweep.json
+model_type: transolver
+model:
+  d_model: 184
+  nhead: 8
+  layers: 3
+  slices: 32
+  mlp_ratio: 3
+  dropout: 0.0
+train:
+  device: cuda
+  dataset_root: dataset
+  entries:
+  - kcs_fr026_normal_mesh
+  - kcs_fr031_normal_mesh
+  - kcs_fr036_normal_mesh
+  - kcs_fr047_normal_mesh
+  - kcs_fr052_normal_mesh
+  train_strides:
+  - 1
+  - 2
+  epochs: 50
+  steps_per_epoch: 48
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_queries: 4096
+  val_queries: 16384
+  lambda_hull: 1.0
+  seed: 0
+  val_entries:
+  - kcs_fr042_normal_mesh
