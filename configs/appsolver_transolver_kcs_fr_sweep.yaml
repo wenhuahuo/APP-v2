@@ -1,0 +1,47 @@
+# APP 分词 + Transolver slice 主干：KCS 单船型 6 个 Fr 的 normal 网格条目，留一 Fr 验证（Fr=0.416）
+# 训练集 kcs_fr026/031/036/047/052_normal_mesh（Fr 0.260 / 0.312 / 0.364 / 0.468 / 0.520）
+# 验证集 kcs_fr042_normal_mesh（Fr=0.416，落在训练 Fr 范围内的内插工况）
+# 与 appsolver_v2_kcs_fr_sweep 只差主干注意力：求积权重注意力 → Transolver slice 注意力
+stats: dataset/stats_kcs_fr_sweep.json
+model_type: appsolver_transolver
+model:
+  flow_size_tiers:
+  - - 0.05
+    - 0.02
+  - - 0.2
+    - 0.05
+  - - null
+    - 0.15
+  hull_size: 0.05
+  d_model: 128
+  nhead: 8
+  encoder_layers: 3
+  decoder_layers: 3
+  positional: fourier
+  query_basis: siren
+  fourier_features: 32
+  fourier_scale: 4.0
+  slices: 32
+  dropout: 0.0
+train:
+  device: cuda
+  dataset_root: dataset
+  entries:
+  - kcs_fr026_normal_mesh
+  - kcs_fr031_normal_mesh
+  - kcs_fr036_normal_mesh
+  - kcs_fr047_normal_mesh
+  - kcs_fr052_normal_mesh
+  train_strides:
+  - 1
+  - 2
+  epochs: 100
+  steps_per_epoch: 48
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_queries: 4096
+  val_queries: 16384
+  lambda_hull: 1.0
+  seed: 0
+  val_entries:
+  - kcs_fr042_normal_mesh

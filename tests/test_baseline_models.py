@@ -115,5 +115,24 @@ class HybridForwardTest(unittest.TestCase):
         self.assertTrue(all(p.grad is not None for p in model.parameters()))
 
 
+class SliceHybridForwardTest(unittest.TestCase):
+    """APP 分词 + Transolver slice 主干：形状与前缀查询点一致，参数全部有梯度。"""
+
+    def test_forward_and_gradients(self):
+        from appsolver_transolver import APPSolverTransolver
+
+        batch = fake_batch()
+        queries = batch["flow_coords"].reshape(-1, 2)[:QUERIES]
+        queries = torch.column_stack([queries, batch["flow_sdf"].reshape(-1)[:QUERIES]])[None]
+        model = APPSolverTransolver(flow_size_tiers=[[0.3, 0.2], [None, 0.4]], hull_size=0.3,
+                                    d_model=32, nhead=4, encoder_layers=1, decoder_layers=1,
+                                    mlp_ratio=2, slices=8)
+        output = model(batch, queries)
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERIES, 5))
+        self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1))
+        (output["flow"].sum() + output["hull"].sum()).backward()
+        self.assertTrue(all(p.grad is not None for p in model.parameters()))
+
+
 if __name__ == "__main__":
     unittest.main()
