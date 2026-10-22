@@ -18,8 +18,12 @@ def physical_flow_scale(scale):
 
 
 @torch.no_grad()
-def evaluate_entry(model, normalizer, sample, device, chunk=CHUNK):
-    """在条目当前密度的格点（掩除位除外）与整条湿表面上算指标。"""
+def predict_entry(model, normalizer, sample, device, chunk=CHUNK):
+    """整片预测并换算回物理量，返回流场 (N, 5)、船面 Cp (M,) 与流场点的展平下标。
+
+    `index` 取 `flow_mask.reshape(-1)` 的非零位置，与 `flow_points`、`flow_target`
+    的散点顺序一致，可视化据此把预测铺回格点图像。
+    """
     model.eval()
     batch = {key: value.to(device) for key, value in collate_samples([sample]).items()}
     index = torch.nonzero(sample["flow_mask"].reshape(-1), as_tuple=False).squeeze(-1)
@@ -35,11 +39,20 @@ def evaluate_entry(model, normalizer, sample, device, chunk=CHUNK):
     prediction = torch.cat(prediction)
 
     scale = physical_flow_scale(sample["scale"])
-    flow_prediction = (normalizer.flow_mean + normalizer.flow_std * prediction) * scale
+    flow = (normalizer.flow_mean + normalizer.flow_std * prediction) * scale
+    hull = normalizer.hull_mean + normalizer.hull_std * hull_prediction
+    return flow, hull, index
+
+
+@torch.no_grad()
+def evaluate_entry(model, normalizer, sample, device, chunk=CHUNK):
+    """在条目当前密度的格点（掩除位除外）与整条湿表面上算指标。"""
+    flow_prediction, hull_prediction, index = predict_entry(
+        model, normalizer, sample, device, chunk)
+    scale = physical_flow_scale(sample["scale"])
     flow_target = sample["flow_target"].reshape(-1, 5)[index] * scale
     flow = channel_metrics(flow_prediction, flow_target, sample["flow_weight"].reshape(-1)[index])
 
-    hull_prediction = normalizer.hull_mean + normalizer.hull_std * hull_prediction
     hull_target = sample["hull_pressure"]
     hull = channel_metrics(hull_prediction[:, None], hull_target[:, None], sample["hull_weight"])
     return {
