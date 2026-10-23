@@ -33,7 +33,8 @@ def case_parameters(bundle):
 
     批量船型的 manifest 直接给 `geometry` 与 `condition`；KCS 的 manifest 只有工况，
     几何与流体在 `kcs_reference.json` 里（它同时是湿表面积 S0 的唯一来源）。
-    manifest 的 `run` 一律写作 `<船型>_fr<三位整数>_<网格档位>_<物理时长>`。
+    manifest 的 `run` 一律写作 `<船型>[_<几何变体>]_fr<三位整数>_<网格档位>_<物理时长>`。
+    FFD 变体的 manifest 带 `geometry_variant.name`，条目 id 因此多一段变体名。
     """
     manifest = json.loads((bundle / "case_manifest.json").read_text())
     if "geometry" in manifest:
@@ -41,6 +42,7 @@ def case_parameters(bundle):
         return {
             "run": manifest["run"],
             "hull": manifest["hull"],
+            "variant": None,
             "mesh_level": manifest["mesh_level"],
             "Fr": condition["Fr"],
             "Re": condition["Re"],
@@ -51,15 +53,20 @@ def case_parameters(bundle):
             "rho": condition["rho"],
             "nu": condition["nu"],
             "scale": manifest["mesh_scale_to_kcs"],
+            "end_time": manifest.get("end_time"),
         }
     reference = json.loads((bundle / "kcs_reference.json").read_text())
     parts = manifest["run"].split("_")
-    # 目录名 `<船型>_fr<三位整数>_<网格档位>_<物理时长>`；早期 KCS 算例名没有 Fr 段
-    mesh_parts = parts[2:-1] if parts[1].startswith("fr") else parts[1:-1]
+    # 派生算例的 manifest 直接给 mesh_level；早期算例名没有 Fr 段，靠位置切分
+    mesh_level = manifest.get("mesh_level")
+    if mesh_level is None:
+        mesh_parts = parts[2:-1] if parts[1].startswith("fr") else parts[1:-1]
+        mesh_level = "_".join(mesh_parts)
     return {
         "run": manifest["run"],
         "hull": parts[0],
-        "mesh_level": "_".join(mesh_parts),
+        "variant": (manifest.get("geometry_variant") or {}).get("name"),
+        "mesh_level": mesh_level,
         "Fr": manifest["froude"],
         "Re": manifest["speed"]["Re"],
         "U_inf": manifest["speed"]["U_m_s"],
@@ -69,13 +76,19 @@ def case_parameters(bundle):
         "rho": reference["fluid"]["rho_kg_m3"],
         "nu": reference["fluid"]["nu_m2_s"],
         "scale": reference["geometry"]["scale_lambda"],
+        # 物理时长取自 manifest。早期算例目录名带 `_25s` 但已按 20 s 重新导出，
+        # 目录名不再代表数据时刻
+        "end_time": manifest.get("end_time"),
     }
 
 
 def entry_identity(parameters):
-    """条目 id：<船型>_fr<三位整数>_<网格档位>。"""
+    """条目 id：<船型>[_<几何变体>]_fr<三位整数>_<网格档位>。"""
     fr_code = round(parameters["Fr"] * 100)
-    return f"{parameters['hull']}_fr{fr_code:03d}_{parameters['mesh_level']}"
+    stem = parameters["hull"]
+    if parameters["variant"]:
+        stem = f"{stem}_{parameters['variant']}"
+    return f"{stem}_fr{fr_code:03d}_{parameters['mesh_level']}"
 
 
 def build_entry(bundle, dataset_root, box=FLOW_BOX):
@@ -147,7 +160,9 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
     meta = {
         "entry_id": entry_id,
         "source_case": parameters["run"],
+        "end_time": parameters["end_time"],
         "hull": parameters["hull"],
+        "geometry_variant": parameters["variant"],
         "mesh_level": parameters["mesh_level"],
         "Fr": parameters["Fr"],
         "Re": parameters["Re"],

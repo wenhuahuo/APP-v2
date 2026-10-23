@@ -61,9 +61,10 @@ else
   cp "$CASE/$STL" "$WORK/$STL"
 fi
 
-# 只有 KCS 有参考几何（Lpp/T/S0/rho/nu）；其余船型的这些量在 manifest 里
+# 只有 KCS 有参考几何（Lpp/T/S0/rho/nu）；其余船型的这些量在 manifest 里。
+# 按 STL 文件名判断船型：FFD 变体的派生算例复用源算例的 STL，自己目录下没有。
 REF=$HOME/Documents/ShipMaster/openfoam/calm_water/reference/kcs_tokyo2015_case2_1.json
-if [[ -f "$CASE/KCS_Hull.stl.gz" ]]; then
+if [[ "$(basename "$STL")" == KCS_Hull.stl.gz ]]; then
   cp "$REF" "$WORK/kcs_reference.json"
 fi
 
