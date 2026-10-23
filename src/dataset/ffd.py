@@ -18,8 +18,18 @@ KCS 变体族的约定：
 - 控制点数 `KCS_LATTICE = (9, 5, 6)`：沿 x 8 阶可分辨艏、舯、艉与球鼻，
   沿 y 4 阶（中纵剖面与两舷），沿 z 5 阶（船底、舭部、水线附近、甲板）。
 - 沿 y 的位移按 `sign(y)` 施加，左右舷对称；中纵剖面上的点不动。
-- 目标位移取 20–60 mm（船长的 0.3%–0.8%），湿面积变化 1%–5%，
-  snappyHexMesh 仍能贴合。
+- 变体是**全局参数级**变形：半宽缩放（按局部半宽比例 `|y|/half_beam`）、吃水平移
+  （整体 z 平移）与舯部中体形状（钟形包络内的半宽缩放）三类，位移 40–130 mm
+  （船长的 0.5%–1.8%），湿面积变化 ±12%~±16%。
+
+为什么取 10% 量级的湿面积变化：KCS 周长约 2(T+B/2) = 1.703 m，湿面积 8.35 m²。
+湿面积变 X% 对应自由面波高（Fr=0.26 约 0.11 m）同量级的 X% 位移信号，即约 X% × 波高。
+位移 20–60 mm、湿面积 0.2%–2.7% 的第一批变体，eta 场 RMS 差只有 1.0–1.6 mm，
+与 20s/25s 截断误差（0.97 mm）同量级，模型无法区分；湿面积 ≥10% 才让信号
+（≥10 mm）高出截断误差一个量级。
+
+吃水变化用 z 平移实现（水面 z = `KCS_DRAFT` 不动、船体整体下沉/上浮），这样水面位置
+不变，`build_entry.py` 的湿表面判断（z ≤ 0.3418）与 setFields 的 boxToCell 上限都不用改。
 """
 
 from math import comb
@@ -27,6 +37,9 @@ from math import comb
 import numpy as np
 
 KCS_LATTICE = (9, 5, 6)
+
+# KCS 设计吃水（水面 z 坐标，龙骨在 z = 0）。吃水变化用 z 平移，水面本身不动。
+KCS_DRAFT = 0.3418
 
 
 def bernstein_matrix(t, count):
@@ -102,97 +115,143 @@ def _centerline_taper(points, bounds, width=0.25):
     return np.clip((np.abs(points[:, 1]) / (width * half_beam)) ** 2, 0.0, 1.0)
 
 
-def wide_midship(points, bounds, amount=0.030):
-    """全局：舯部半宽外扩 30 mm。"""
-    sx, _ = _normalized(points, bounds)
+def _smoothstep(edge0, edge1, value):
+    """C1 连续的一次过渡：value ≤ edge0 取 0，≥ edge1 取 1。"""
+    t = np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _beam_shift(points, bounds, ratio, envelope=None):
+    """半宽按局部半宽比例缩放 ratio 的横向位移（左右舷对称，艏艉中线衰减）。
+
+    位移取 `ratio × |y|`：船体表面每点的横向外扩/内收量正比于该点的局部半宽，
+    于是横剖面形状保持相似，半宽整体缩放 ratio。`envelope` 给出沿 x 的包络，
+    用来把变形限制在中体（改方形系数）。`_centerline_taper` 在艏柱/艉柱处把位移
+    衰减到 0，否则左右舷互相穿透、三角形翻转。
+    """
+    weight = np.abs(points[:, 1])
+    if envelope is not None:
+        weight = weight * envelope(_normalized(points, bounds)[0])
+    return np.sign(points[:, 1]) * ratio * weight * _centerline_taper(points, bounds)
+
+
+def _midship_envelope(sx):
+    """中体包络：sx ∈ [0.25, 0.75] 取 1，两端 smoothstep 过渡到 0（sx ≤ 0.05、≥ 0.95）。"""
+    return _smoothstep(0.05, 0.25, sx) * (1.0 - _smoothstep(0.75, 0.95, sx))
+
+
+def _dry_taper(points):
+    """水线以上把横向位移平滑衰减到 0（水线处为 1，z ≥ 水线 + 0.1 m 处为 0）。
+
+    STL 的甲板平面是从艉部一点扇形展开到甲板边线的一批大长条三角形（边长达 5 m、
+    宽度只有 15 mm）。任何沿 x 变化的横向位移都会让长条的两端错动而翻面——这是粗
+    甲板三角化的产物，不是光滑映射的折叠，却会让 snappyHexMesh 在干舷侧出现伪
+    相交。中体变形的横向位移只在湿面以下起作用，水线以上保留原宽度即可。
+    """
+    return 1.0 - _smoothstep(KCS_DRAFT, KCS_DRAFT + 0.10, points[:, 2])
+
+
+def _draft_shift(points, ratio):
+    """吃水变化 ratio（相对设计吃水）的 z 平移：吃水增加 = 船体下沉 = z 减小。
+
+    水面（z = `KCS_DRAFT`）不动、船体整体平移，均匀位移用 Bernstein 基可以精确表示
+    （基函数和为 1），拟合残差为 0。
+    """
+    return np.full(len(points), -ratio * KCS_DRAFT, dtype=np.float64)
+
+
+def _global_form(points, bounds, beam=0.0, draft=0.0, midship=0.0):
+    """全局参数级变形的合成：整体半宽缩放 + 吃水平移 + 中体半宽缩放。"""
     target = np.zeros_like(points)
-    target[:, 1] = np.sign(points[:, 1]) * amount * _bell(sx, 0.5, 0.28) \
-        * _centerline_taper(points, bounds)
+    if beam:
+        target[:, 1] += _beam_shift(points, bounds, beam)
+    if midship:
+        target[:, 1] += _beam_shift(points, bounds, midship,
+                                    envelope=_midship_envelope) * _dry_taper(points)
+    if draft:
+        target[:, 2] += _draft_shift(points, draft)
     return target
 
 
-def narrow_entrance(points, bounds, amount=0.032):
-    """全局：艏部进流段半宽内收 32 mm，从舯部平滑过渡到艏柱。"""
-    sx, _ = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 1] = -np.sign(points[:, 1]) * amount * _bell(sx, 0.86, 0.22) \
-        * _centerline_taper(points, bounds)
-    return target
+def fat_hull(points, bounds, beam=0.12, draft=0.12):
+    """全局：半宽 +12% + 吃水 +12%，湿面积 +15.6%。"""
+    return _global_form(points, bounds, beam=beam, draft=draft)
 
 
-def full_stern(points, bounds, amount=0.028):
-    """全局：艉部半宽外扩 28 mm，改善艉部伴流。"""
-    sx, _ = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 1] = np.sign(points[:, 1]) * amount * _bell(sx, 0.12, 0.20) \
-        * _centerline_taper(points, bounds)
-    return target
+def thin_hull(points, bounds, beam=-0.12, draft=-0.12):
+    """全局：半宽 −12% + 吃水 −12%，湿面积 −12.9%。"""
+    return _global_form(points, bounds, beam=beam, draft=draft)
 
 
-def shallow_body(points, bounds, amount=0.025):
-    """全局：船底整体上抬 25 mm，减小方形系数。"""
-    sx, sz = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 2] = amount * _bell(sz, 0.0, 0.32) * (0.4 + 0.6 * _bell(sx, 0.5, 0.45))
-    return target
+def wide_beam(points, bounds, beam=0.20):
+    """全局：半宽 +20%，湿面积 +12.9%。"""
+    return _global_form(points, bounds, beam=beam)
 
 
-def deep_forefoot(points, bounds, amount=0.022):
-    """全局：艏部前踵下沉 22 mm，增大艏部排水量。"""
-    sx, sz = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 2] = -amount * _bell(sx, 0.88, 0.20) * _bell(sz, 0.10, 0.28)
-    return target
+def narrow_beam(points, bounds, beam=-0.20):
+    """全局：半宽 −20%，湿面积 −12.4%。"""
+    return _global_form(points, bounds, beam=beam)
 
 
-def bow_bulb_protrusion(points, bounds, amount=0.060):
-    """局部：球鼻艏沿 +x 前伸 60 mm。"""
-    sx, sz = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 0] = amount * _bell(sx, 1.0, 0.16) * _bell(sz, 0.16, 0.20)
-    return target
+def deep_draft(points, bounds, draft=0.24):
+    """全局：吃水 +24%（船体下沉 82 mm），湿面积 +15.6%。"""
+    return _global_form(points, bounds, draft=draft)
 
 
-def bilge_rounding(points, bounds, amount=0.022):
-    """局部：舭部外扩 22 mm 并上抬 13 mm，增大舭部圆角。"""
-    sx, sz = _normalized(points, bounds)
-    weight = _bell(sx, 0.55, 0.24) * _bell(sz, 0.10, 0.20)
-    target = np.zeros_like(points)
-    target[:, 1] = np.sign(points[:, 1]) * amount * weight * _centerline_taper(points, bounds)
-    target[:, 2] = 0.6 * amount * weight
-    return target
+def shallow_draft(points, bounds, draft=-0.24):
+    """全局：吃水 −24%（船体上浮 82 mm），湿面积 −13.6%。"""
+    return _global_form(points, bounds, draft=draft)
 
 
-def stern_dent(points, bounds, amount=0.020):
-    """局部：艉部舭部区内凹 20 mm。"""
-    sx, sz = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 1] = -np.sign(points[:, 1]) * amount * _bell(sx, 0.10, 0.14) * _bell(sz, 0.25, 0.22) \
-        * _centerline_taper(points, bounds)
-    return target
+def high_cb(points, bounds, midship=0.25):
+    """全局：中体半宽 +25%（sx ∈ [0.25, 0.75] 平台包络，水线以上衰减到 0），湿面积 +13.9%。"""
+    return _global_form(points, bounds, midship=midship)
 
 
-def bow_flare_underwater(points, bounds, amount=0.025):
-    """局部：艏部水线附近水下外飘 25 mm。"""
-    sx, sz = _normalized(points, bounds)
-    target = np.zeros_like(points)
-    target[:, 1] = np.sign(points[:, 1]) * amount * _bell(sx, 0.88, 0.18) * _bell(sz, 0.42, 0.18) \
-        * _centerline_taper(points, bounds)
-    return target
+def low_cb(points, bounds, midship=-0.25):
+    """全局：中体半宽 −25%（平台包络，水线以上衰减到 0），湿面积 −13.3%。"""
+    return _global_form(points, bounds, midship=midship)
 
 
-# 变体名 → (目标位移函数, 中文说明)。9 个变体：5 个全局、4 个局部
+def full_form(points, bounds, beam=0.08, draft=0.08, midship=0.08):
+    """全局：半宽 +8% + 吃水 +8% + 中体 +8%，湿面积 +13.8%。"""
+    return _global_form(points, bounds, beam=beam, draft=draft, midship=midship)
+
+
+# 变体名 → (目标位移函数, 中文说明, 吃水变化 ΔT m)。ΔT > 0 表示吃水加深（船体下沉）；
+# 没有吃水变化的变体取 0。湿面积变化是相对原船 8.3525 m² 的实测值。
 KCS_VARIANTS = {
-    "wide_midship": (wide_midship, "全局：舯部半宽外扩 30 mm"),
-    "narrow_entrance": (narrow_entrance, "全局：艏部进流段内收 32 mm"),
-    "full_stern": (full_stern, "全局：艉部半宽外扩 28 mm"),
-    "shallow_body": (shallow_body, "全局：船底上抬 25 mm"),
-    "deep_forefoot": (deep_forefoot, "全局：艏部前踵下沉 22 mm"),
-    "bow_bulb_protrusion": (bow_bulb_protrusion, "局部：球鼻艏前伸 60 mm"),
-    "bilge_rounding": (bilge_rounding, "局部：舭部外扩上抬 22 mm"),
-    "stern_dent": (stern_dent, "局部：艉部舭部区内凹 20 mm"),
-    "bow_flare_underwater": (bow_flare_underwater, "局部：艏部水下外飘 25 mm"),
+    "fat_hull": (fat_hull, "全局：半宽 +12% + 吃水 +12%（湿面积 +15.6%）",
+                 0.12 * KCS_DRAFT),
+    "thin_hull": (thin_hull, "全局：半宽 −12% + 吃水 −12%（湿面积 −12.9%）",
+                  -0.12 * KCS_DRAFT),
+    "wide_beam": (wide_beam, "全局：半宽 +20%（湿面积 +12.9%）", 0.0),
+    "narrow_beam": (narrow_beam, "全局：半宽 −20%（湿面积 −12.4%）", 0.0),
+    "deep_draft": (deep_draft, "全局：吃水 +24%（湿面积 +15.6%）", 0.24 * KCS_DRAFT),
+    "shallow_draft": (shallow_draft, "全局：吃水 −24%（湿面积 −13.6%）", -0.24 * KCS_DRAFT),
+    "high_cb": (high_cb, "全局：中体半宽 +25%（湿面积 +13.9%）", 0.0),
+    "low_cb": (low_cb, "全局：中体半宽 −25%（湿面积 −13.3%）", 0.0),
+    "full_form": (full_form, "全局：半宽 +8% + 吃水 +8% + 中体 +8%（湿面积 +13.3%）",
+                  0.08 * KCS_DRAFT),
 }
+
+
+def wetted_area(points, faces, draft=KCS_DRAFT):
+    """设计吃水以下三角形的面积和，用于核对变体的湿面积变化。"""
+    triangles = np.asarray(points, dtype=np.float64)[np.asarray(faces, dtype=np.int64)]
+    wetted = (triangles[:, :, 2] <= draft).all(axis=1)
+    cross = np.cross(triangles[wetted, 1] - triangles[wetted, 0],
+                     triangles[wetted, 2] - triangles[wetted, 0])
+    return float(0.5 * np.linalg.norm(cross, axis=1).sum())
+
+
+def flipped_triangles(points, moved, faces):
+    """变形后法向反转的三角形数量（几何非法：曲面自交/折叠）。"""
+    original = np.asarray(points, dtype=np.float64)[np.asarray(faces, dtype=np.int64)]
+    deformed = np.asarray(moved, dtype=np.float64)[np.asarray(faces, dtype=np.int64)]
+    before = np.cross(original[:, 1] - original[:, 0], original[:, 2] - original[:, 0])
+    after = np.cross(deformed[:, 1] - deformed[:, 0], deformed[:, 2] - deformed[:, 0])
+    return int(np.count_nonzero(np.einsum("nc,nc->n", before, after) <= 0.0))
 
 
 def kcs_displacements(variant, points, bounds):

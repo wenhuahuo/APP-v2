@@ -6,7 +6,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src/dataset"))
 
-from ffd import (KCS_VARIANTS, apply_ffd, bernstein_matrix, control_lattice,
+from ffd import (KCS_DRAFT, KCS_VARIANTS, apply_ffd, bernstein_matrix, control_lattice,
                  fit_control_displacements, kcs_displacements)
 
 
@@ -40,15 +40,27 @@ class FreeFormDeformationTest(unittest.TestCase):
 
     def test_points_outside_lattice_stay_fixed(self):
         outside = np.array([[8.0, 0.2, 0.3], [3.0, 0.9, 0.3], [3.0, 0.2, 1.2]])
-        displacement = kcs_displacements("wide_midship", self.points, self.bounds)
+        displacement = kcs_displacements("wide_beam", self.points, self.bounds)
         np.testing.assert_allclose(apply_ffd(outside, self.bounds, displacement), outside)
 
     def test_fitted_displacement_reproduces_target(self):
-        target = KCS_VARIANTS["wide_midship"][0](self.points, self.bounds)
+        target = KCS_VARIANTS["wide_beam"][0](self.points, self.bounds)
         fitted = fit_control_displacements(self.points, self.bounds, target)
         moved = apply_ffd(self.points, self.bounds, fitted)
         residual = np.abs((moved - self.points) - target).max()
         self.assertLess(residual, 0.35 * np.abs(target).max())
+
+    def test_draft_variants_are_rigid_vertical_shifts(self):
+        for name in ("deep_draft", "shallow_draft", "fat_hull"):
+            draft_change = KCS_VARIANTS[name][2]
+            target = KCS_VARIANTS[name][0](self.points, self.bounds)
+            np.testing.assert_allclose(target[:, 2], -draft_change, atol=1e-12, err_msg=name)
+        # 均匀位移能被 Bernstein 基精确表示，拟合后 z 位移没有残差
+        for name in ("deep_draft", "shallow_draft"):
+            shift = apply_ffd(self.points, self.bounds,
+                              kcs_displacements(name, self.points, self.bounds))
+            np.testing.assert_allclose(shift[:, 2] - self.points[:, 2],
+                                       -KCS_VARIANTS[name][2], atol=1e-9, err_msg=name)
 
     def test_centerline_target_has_no_lateral_shift(self):
         centerline = np.column_stack([np.linspace(0.1, 6.9, 50), np.zeros(50),
@@ -59,10 +71,30 @@ class FreeFormDeformationTest(unittest.TestCase):
 
     def test_lateral_target_is_mirror_symmetric(self):
         mirrored = self.points * np.array([1.0, -1.0, 1.0])
-        for name in ("wide_midship", "bow_flare_underwater", "bilge_rounding"):
+        for name in ("wide_beam", "narrow_beam", "high_cb", "low_cb", "full_form"):
             forward = KCS_VARIANTS[name][0](self.points, self.bounds)
             backward = KCS_VARIANTS[name][0](mirrored, self.bounds)
             np.testing.assert_allclose(forward[:, 1], -backward[:, 1], atol=1e-12)
+
+    def test_beam_variants_scale_local_half_beam(self):
+        # 半宽变形的位移正比于局部 |y|：舯部最宽处最大，中纵剖面上为 0
+        target = KCS_VARIANTS["wide_beam"][0](self.points, self.bounds)
+        half_beam = (self.bounds[1][1] - self.bounds[1][0]) / 2.0
+        expected = 0.20 * np.abs(self.points[:, 1]) * \
+            np.clip((np.abs(self.points[:, 1]) / (0.25 * half_beam)) ** 2, 0.0, 1.0)
+        np.testing.assert_allclose(np.abs(target[:, 1]), expected, atol=1e-12)
+
+    def test_midship_target_fades_out_above_waterline(self):
+        # 中体变形只作用在湿面：水线以上横向位移衰减到 0，避免粗甲板三角化翻面
+        above = np.column_stack([np.full(20, 3.0), np.full(20, 0.4),
+                                 np.linspace(0.3418 + 0.10, 0.74, 20)])
+        wet = np.column_stack([np.full(20, 3.0), np.full(20, 0.4),
+                               np.linspace(0.0, 0.3418, 20)])
+        for name in ("high_cb", "low_cb"):
+            np.testing.assert_allclose(KCS_VARIANTS[name][0](above, self.bounds)[:, 1], 0.0,
+                                       atol=1e-12, err_msg=name)
+            self.assertGreater(np.abs(KCS_VARIANTS[name][0](wet, self.bounds)[:, 1]).max(),
+                               1e-3, f"{name} 湿面没有位移")
 
     def test_variant_amplitude_stays_small(self):
         length = self.bounds[0][1] - self.bounds[0][0]
@@ -71,7 +103,7 @@ class FreeFormDeformationTest(unittest.TestCase):
                               kcs_displacements(name, self.points, self.bounds))
             maximum = np.abs(shift - self.points).max()
             self.assertGreater(maximum, 1e-4, f"{name} 没有任何位移")
-            self.assertLess(maximum, 0.02 * length, f"{name} 位移 {maximum:.3f} m 过大")
+            self.assertLess(maximum, 0.03 * length, f"{name} 位移 {maximum:.3f} m 过大")
 
 
 if __name__ == "__main__":

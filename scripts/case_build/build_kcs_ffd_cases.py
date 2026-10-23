@@ -3,8 +3,8 @@
 用法:
     python3 scripts/case_build/build_kcs_ffd_cases.py \
         --source ~/Documents/OpenFoamWorks/APPSolver-v2-Dataset/kcs_normal_mesh_25s \
-        --variants wide_midship narrow_entrance full_stern shallow_body deep_forefoot \
-                   bow_bulb_protrusion bilge_rounding stern_dent bow_flare_underwater
+        --variants fat_hull thin_hull wide_beam narrow_beam deep_draft shallow_draft \
+                   high_cb low_cb full_form --end-time 20
 
 每个变体生成 `<root>/kcs_<variant>_normal_mesh_25s`：
 
@@ -12,7 +12,12 @@
 - `system/`、`0.orig/`、`Allmesh`：复制源算例，网格由 Allmesh 重建
 - `scripts/submit.sbatch`：建网格作业（blockMesh + 6 次 refineMesh + snappyHexMesh）
 - `ffd_displacements.npy`：控制点位移 (9, 5, 6, 3)，几何标签
-- `case_manifest.json`：变体名、目标位移、湿面积变化
+- `case_manifest.json`：变体名、目标位移、湿面积变化、吃水变化
+
+变体是全局参数级变形（半宽缩放 / 吃水平移 / 中体缩放），湿面积变化 ±12%~±16%。
+吃水变化用 z 平移实现，水面 z = 0.3418 不动，所以源算例的 setFields 与
+`build_entry.py` 的湿表面判断都不用改；manifest 仍记录 ΔT 与 `draft_override`
+（= 0.3418 + ΔT），供后续组装参考。
 
 派生 6 个 Fr 工况用上游的 build_kcs_fr_sweep.py --variant <name>。
 """
@@ -28,7 +33,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src/dataset"))
 
-from ffd import KCS_VARIANTS, apply_ffd, hull_bounds, kcs_displacements
+from ffd import (KCS_DRAFT, KCS_VARIANTS, apply_ffd, hull_bounds, kcs_displacements,
+                 wetted_area)
 from stl_io import read_stl_gz, write_stl_gz
 
 MESH_SUBMIT = """#!/bin/bash
@@ -62,21 +68,12 @@ printf 'job=%s finish=%s\\n' "${{SLURM_JOB_ID}}" "$(date -Is)"
 """
 
 
-def wetted_area(points, faces, draft):
-    """设计吃水以下三角形的面积和。"""
-    triangles = points[faces]
-    wetted = (triangles[:, :, 2] <= draft).all(axis=1)
-    cross = np.cross(triangles[wetted, 1] - triangles[wetted, 0],
-                     triangles[wetted, 2] - triangles[wetted, 0])
-    return float(0.5 * np.linalg.norm(cross, axis=1).sum())
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True)
     parser.add_argument("--variants", nargs="+", required=True, choices=sorted(KCS_VARIANTS))
     parser.add_argument("--end-time", type=float, required=True, help="物理时长 s")
-    parser.add_argument("--draft", type=float, default=0.3418)
+    parser.add_argument("--draft", type=float, default=KCS_DRAFT)
     args = parser.parse_args()
 
     source = Path(args.source).expanduser().resolve()
@@ -117,6 +114,20 @@ def main():
         np.save(destination / "ffd_displacements.npy", displacements)
 
         area = wetted_area(moved, faces, args.draft)
+        draft_change = KCS_VARIANTS[variant][2]
+        geometry_variant = {
+            "name": variant,
+            "description": KCS_VARIANTS[variant][1],
+            "method": "FFD：9×5×6 控制格架，三元 Bernstein 位移场，控制点位移由目标位移最小二乘反解",
+            "control_lattice": [9, 5, 6],
+            "lattice_bounds": [list(b) for b in bounds],
+            "max_displacement_m": float(np.abs(moved - points).max()),
+            "wetted_area_m2": area,
+            "wetted_area_change": area / base_area - 1.0,
+        }
+        if draft_change:
+            # 吃水变化 = 船体 z 平移，水面不动；ΔT > 0 表示吃水加深（船体下沉）
+            geometry_variant["draft_change"] = draft_change
         manifest = json.loads((source / "case_manifest.json").read_text())
         manifest.update({
             "case": name,
@@ -124,26 +135,24 @@ def main():
             "run": name,
             "derived_from": source.name,
             "stl_gz": str(destination / "KCS_Hull.stl.gz"),
-            "geometry_variant": {
-                "name": variant,
-                "description": KCS_VARIANTS[variant][1],
-                "method": "FFD：9×5×6 控制格架，三元 Bernstein 位移场，控制点位移由目标位移最小二乘反解",
-                "control_lattice": [9, 5, 6],
-                "lattice_bounds": [list(b) for b in bounds],
-                "max_displacement_m": float(np.abs(moved - points).max()),
-                "wetted_area_m2": area,
-                "wetted_area_change": area / base_area - 1.0,
-            },
+            "geometry_variant": geometry_variant,
             "modifications": [f"船体几何 FFD 变体 {variant}（{KCS_VARIANTS[variant][1]}）",
                               f"网格由 Allmesh 重建，加密框与边界层设置沿用 {source.name}"],
         })
+        if draft_change:
+            # 水线坐标不变（仍是 0.3418 m），变体的吃水供后续组装参考
+            manifest["draft_override"] = args.draft + draft_change
+            manifest["modifications"].append(
+                f"吃水 {args.draft:g} → {args.draft + draft_change:g} m"
+                f"（船体 z 平移 {-draft_change * 1000:+.1f} mm，水面不动）")
         manifest.pop("mesh_reused_from", None)
         manifest["numerics"] = dict(manifest.get("numerics") or {})
         manifest["numerics"]["endTime"] = f"{end_time:g} s"
         (destination / "case_manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+        draft_note = f", 吃水变化 {draft_change*1000:+.1f} mm" if draft_change else ""
         print(f"{name}: 最大位移 {manifest['geometry_variant']['max_displacement_m']*1000:.1f} mm, "
-              f"湿面积 {area:.4f} m² ({area/base_area-1:+.2%})")
+              f"湿面积 {area:.4f} m² ({area/base_area-1:+.2%}){draft_note}")
 
 
 if __name__ == "__main__":
