@@ -33,8 +33,7 @@ def case_parameters(bundle):
 
     批量船型的 manifest 直接给 `geometry` 与 `condition`；KCS 的 manifest 只有工况，
     几何与流体在 `kcs_reference.json` 里（它同时是湿表面积 S0 的唯一来源）。
-    manifest 的 `run` 一律写作 `<船型>[_<几何变体>]_fr<三位整数>_<网格档位>_<物理时长>`。
-    FFD 变体的 manifest 带 `geometry_variant.name`，条目 id 因此多一段变体名。
+    manifest 的 `run` 一律写作 `<船型>_fr<三位整数>_<网格档位>_<物理时长>`。
     """
     manifest = json.loads((bundle / "case_manifest.json").read_text())
     if "geometry" in manifest:
@@ -42,7 +41,6 @@ def case_parameters(bundle):
         return {
             "run": manifest["run"],
             "hull": manifest["hull"],
-            "variant": None,
             "mesh_level": manifest["mesh_level"],
             "Fr": condition["Fr"],
             "Re": condition["Re"],
@@ -65,7 +63,6 @@ def case_parameters(bundle):
     return {
         "run": manifest["run"],
         "hull": parts[0],
-        "variant": (manifest.get("geometry_variant") or {}).get("name"),
         "mesh_level": mesh_level,
         "Fr": manifest["froude"],
         "Re": manifest["speed"]["Re"],
@@ -83,12 +80,9 @@ def case_parameters(bundle):
 
 
 def entry_identity(parameters):
-    """条目 id：<船型>[_<几何变体>]_fr<三位整数>_<网格档位>。"""
+    """条目 id：<船型>_fr<三位整数>_<网格档位>。"""
     fr_code = round(parameters["Fr"] * 100)
-    stem = parameters["hull"]
-    if parameters["variant"]:
-        stem = f"{stem}_{parameters['variant']}"
-    return f"{stem}_fr{fr_code:03d}_{parameters['mesh_level']}"
+    return f"{parameters['hull']}_fr{fr_code:03d}_{parameters['mesh_level']}"
 
 
 def build_entry(bundle, dataset_root, box=FLOW_BOX):
@@ -109,11 +103,9 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
 
     alpha = internal["fields"]["alpha.water"].astype(np.float64)
     # MULES 的有界性有残差：实测高 Fr 粗网格算例（npl_round_bilge，Fr 0.40）末态
-    # 有 0.2% 单元落在 1 + 2.3e-4，2.7% 单元落在 -2.9e-7。FFD 变形网格上残差更大：
-    # `wide_beam`（半宽 +20%）有 3.9% 的迭代步出现 alpha > 1.001、末态最大 1.00112，
-    # `fat_hull`（半宽/吃水 +12%）最大 1.00145。越界都在 1.0 附近，alpha = 0.5
-    # 等值面不受影响，容差按实测放到 2e-3
-    if alpha.min() < -1e-3 or alpha.max() > 1.0 + 2e-3:
+    # 有 0.2% 单元落在 1 + 2.3e-4，2.7% 单元落在 -2.9e-7；alpha = 0.5 等值面不受影响。
+    # 这里只拦明显越界（1e-3）
+    if alpha.min() < -1e-3 or alpha.max() > 1.0 + 1e-3:
         raise ValueError(f"{entry_id} 的 alpha.water 越界: [{alpha.min()}, {alpha.max()}]")
     velocity = internal["fields"]["U"].astype(np.float64)
     pressure = internal["fields"]["p_rgh"].astype(np.float64)
@@ -164,7 +156,6 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
         "source_case": parameters["run"],
         "end_time": parameters["end_time"],
         "hull": parameters["hull"],
-        "geometry_variant": parameters["variant"],
         "mesh_level": parameters["mesh_level"],
         "Fr": parameters["Fr"],
         "Re": parameters["Re"],
