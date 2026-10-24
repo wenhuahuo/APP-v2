@@ -1,9 +1,10 @@
-"""预归一化 transformer 块，工况参数由配置选择 FiLM / adaLN / adaLN-Zero 调制。
+"""预归一化 transformer 块，工况参数由配置选择 none / FiLM / adaLN / adaLN-Zero 调制。
 
 工况（Fr、log10 Re）不拼成 token 前缀：v1 已证明该做法拿不到条件增益。这里由
 条件 MLP 生成逐层的调制参数：`film` 在 block 入口做 `x·(1+γ)+β`；`adaln` /
 `adaln_zero` 把 LayerNorm 后的特征按残差分支（注意力 / MLP）分别调制，
-`adaln_zero` 再加逐分支门控。参数只与工况维度有关，与 token 数无关。
+`adaln_zero` 再加逐分支门控。`none` 不构造调制模块、不读取工况值，block 只保留
+原来的注意力与 MLP。参数只与工况维度有关，与 token 数无关。
 """
 
 import torch.nn as nn
@@ -28,6 +29,13 @@ class EncoderBlock(nn.Module):
         )
 
     def forward(self, tokens, weight, coords, condition):
+        if self.kind == "none":
+            tokens = tokens + self.attention(self.norm_attention(tokens),
+                                            self.norm_attention(tokens),
+                                            weight=weight, coords_query=coords, coords_key=coords)
+            tokens = tokens + self.mlp(self.norm_mlp(tokens))
+            return tokens
+
         modulation = self.modulation(condition)
         if self.kind == "film":
             gamma, beta = modulation

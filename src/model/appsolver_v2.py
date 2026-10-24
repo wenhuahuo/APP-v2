@@ -9,8 +9,9 @@
    分别过流场头与船面压力头。
 
 工况参数（Fr、log10 Re）按配置 `conditioning` 逐层注入，不占 token 位：
-`film`（默认，block 入口 `x·(1+γ)+β`）/ `adaln` / `adaln_zero`（DiT 式，见
-`conditioning.py`）。编码器与查询解码器用同一种调制。
+`none`（不使用条件编码）/ `film`（默认，block 入口 `x·(1+γ)+β`）/ `adaln` /
+`adaln_zero`（DiT 式，见 `conditioning.py`）。编码器与查询解码器用同一种配置；
+`none` 时两处都没有条件调制参数，工况值不参与前向计算。
 """
 
 import numpy as np

@@ -1,8 +1,10 @@
-"""工况条件调制：`film` / `adaln` / `adaln_zero` 三种，由配置 `model.conditioning` 选择。
+"""工况条件调制：`none` / `film` / `adaln` / `adaln_zero` 四种，由配置选择。
 
-三者都从工况向量（`Fr`、`log10 Re`）生成逐层、逐通道的调制参数，参数量只与工况维度
-和 `d_model` 有关，与 token 数、查询点数无关；工况不占 token 位。
+带条件的三种都从工况向量（`Fr`、`log10 Re`）生成逐层、逐通道的调制参数，参数量只
+与工况维度和 `d_model` 有关，与 token 数、查询点数无关；工况不占 token 位。
 
+- `none`：不使用条件编码。没有任何条件调制参数，block 内只有原来的注意力与 MLP；
+  工况张量只作为批次接口保留，不参与任何计算。
 - `film`：每个 block **入口**做 `x·(1+γ) + β`，随后是原来的注意力与 MLP。
 - `adaln`：DiT 的 adaLN。self/cross-attention 与 MLP 两个残差分支各自在 LayerNorm
   之后做 `x·(1+scale) + shift` 再进入分支，block 入口不再叠加 FiLM。
@@ -15,7 +17,14 @@
 
 import torch.nn as nn
 
-CONDITIONINGS = ("film", "adaln", "adaln_zero")
+CONDITIONINGS = ("none", "film", "adaln", "adaln_zero")
+
+
+class NoConditioning(nn.Module):
+    """显式不使用条件：不含任何参数，也不产生调制张量。"""
+
+    def forward(self, condition):
+        return None
 
 
 class FiLM(nn.Module):
@@ -55,6 +64,8 @@ class AdaNorm(nn.Module):
 
 def make_conditioning(kind, condition_dim, d_model):
     """按配置名构造调制模块；未知名字直接报错，不做静默回退。"""
+    if kind == "none":
+        return NoConditioning()
     if kind == "film":
         return FiLM(condition_dim, d_model)
     if kind == "adaln":

@@ -3,8 +3,8 @@
 查询点只是输出函数的一种离散化：查询之间不做自注意力，否则某个点的取值会依赖
 同批其它查询点的选取，破坏分辨率无关性。因此解码代价是关于查询点数的线性开销。
 
-工况调制与编码器用同一种配置（FiLM / adaLN / adaLN-Zero），作用在查询特征上；
-交叉注意力的 memory、求积权重与坐标语义不变。
+工况调制与编码器用同一种配置（none / FiLM / adaLN / adaLN-Zero），作用在查询特征上；
+`none` 不加任何调制，也不引入参数。交叉注意力的 memory、求积权重与坐标语义不变。
 """
 
 import torch.nn as nn
@@ -54,6 +54,12 @@ class DecoderBlock(nn.Module):
         )
 
     def forward(self, queries, tokens, weight, coords_query, coords_key, condition):
+        if self.kind == "none":
+            queries = queries + self.cross(self.norm_cross(queries), tokens, weight=weight,
+                                          coords_query=coords_query, coords_key=coords_key)
+            queries = queries + self.mlp(self.norm_mlp(queries))
+            return queries
+
         modulation = self.modulation(condition)
         if self.kind == "film":
             gamma, beta = modulation
