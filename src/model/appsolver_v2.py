@@ -8,14 +8,16 @@
 3. 查询点（自由液面任意坐标 / 船体湿表面任意 UV）经坐标基与交叉注意力取回该处取值，
    分别过流场头与船面压力头。
 
-工况参数（Fr、log10 Re）通过逐层 FiLM 注入，不占 token 位。
+工况参数（Fr、log10 Re）按配置 `conditioning` 逐层注入，不占 token 位：
+`film`（默认，block 入口 `x·(1+γ)+β`）/ `adaln` / `adaln_zero`（DiT 式，见
+`conditioning.py`）。编码器与查询解码器用同一种调制。
 """
 
 import numpy as np
 import torch
 import torch.nn as nn
 
-from encoder import Encoder, FiLM
+from encoder import Encoder
 from positional import FourierFeatures
 from query_decoder import QueryBasis, QueryDecoder
 from tokenizer import flow_tokens, hull_tokens
@@ -26,8 +28,8 @@ class APPSolverV2(nn.Module):
     def __init__(self, flow_size_tiers, hull_size, d_model=64, nhead=4,
                  encoder_layers=2, decoder_layers=2, mlp_ratio=4.0, dropout=0.0,
                  positional="fourier", query_basis="siren", fourier_features=16,
-                 fourier_scale=4.0, condition_dim=2, flow_channels=5, hull_channels=1,
-                 max_level=12):
+                 fourier_scale=4.0, condition_dim=2, conditioning="film",
+                 flow_channels=5, hull_channels=1, max_level=12):
         super().__init__()
         self.flow_size_tiers = flow_size_tiers
         self.hull_size = hull_size
@@ -43,36 +45,34 @@ class APPSolverV2(nn.Module):
                         if positional == "fourier" else None)
 
         rope = positional == "rope"
-        self.encoder = Encoder(d_model, nhead, encoder_layers, mlp_ratio, dropout, rope)
+        self.conditioning = conditioning
+        self.encoder = Encoder(d_model, nhead, encoder_layers, mlp_ratio, dropout, rope,
+                               conditioning, condition_dim)
         self.basis = QueryBasis(2, d_model, query_basis, fourier_scale)
         self.flow_extra = nn.Linear(len(FLOW_FEATURES) - 2, d_model)
         self.hull_extra = nn.Linear(len(HULL_FEATURES) - 2, d_model)
-        self.decoder = QueryDecoder(d_model, nhead, decoder_layers, mlp_ratio, dropout, rope)
+        self.decoder = QueryDecoder(d_model, nhead, decoder_layers, mlp_ratio, dropout, rope,
+                                    conditioning, condition_dim)
         self.flow_head = nn.Linear(d_model, flow_channels)
         self.hull_head = nn.Linear(d_model, hull_channels)
-        self.film = nn.ModuleList([
-            FiLM(condition_dim, d_model) for _ in range(encoder_layers + decoder_layers)
-        ])
 
     def forward(self, batch, flow_queries):
         """batch 为 `collate_samples` 的输出；flow_queries (B,Q,3) 为 [x, y, sdf]。"""
         condition = batch["condition"]
-        modulations = [film(condition) for film in self.film]
-        split = len(self.encoder.blocks)
 
         tokens, weight, coords = self._pad_tokens(
             [self._tokenize(batch, i) for i in range(len(condition))])
-        memory = self.encoder(tokens, weight, coords, modulations[:split])
+        memory = self.encoder(tokens, weight, coords, condition)
 
         flow = self.flow_head(self._decode(flow_queries, self.flow_extra, memory, weight,
-                                          coords, modulations[split:]))
+                                          coords, condition))
         hull = self.hull_head(self._decode(self._hull_queries(batch), self.hull_extra, memory,
-                                          weight, coords, modulations[split:]))
+                                          weight, coords, condition))
         return {"flow": flow, "hull": hull}
 
-    def _decode(self, queries, extra, memory, weight, coords, modulations):
+    def _decode(self, queries, extra, memory, weight, coords, condition):
         embedding = self.basis(queries[..., :2]) + extra(queries[..., 2:])
-        return self.decoder(embedding, memory, weight, queries[..., :2], coords, modulations)
+        return self.decoder(embedding, memory, weight, queries[..., :2], coords, condition)
 
     def _position(self, centres):
         if self.position is None:

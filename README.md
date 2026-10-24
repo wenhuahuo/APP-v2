@@ -52,7 +52,8 @@ python3 vis/kcs_flow_sdf/plot_flow_sdf.py
 
 `src/app/` 按物理尺寸把点集划成 patch，token 取 patch 内的求积加权平均；
 `src/model/` 是共享编码器 + 查询解码器：位置编码可选 Fourier / RoPE，注意力带
-求积权重，工况参数用逐层 FiLM 注入。输出域两个：自由液面 5 通道、船面压力 1 通道，
+求积权重，工况参数用逐层条件调制注入（`model.conditioning`：`film` 默认 /
+`adaln` / `adaln_zero`）。输出域两个：自由液面 5 通道、船面压力 1 通道，
 查询点任意给。
 
 ## 依赖

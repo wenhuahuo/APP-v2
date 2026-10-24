@@ -20,6 +20,7 @@ model:
   query_basis: siren
   fourier_features: 32
   fourier_scale: 4.0
+  conditioning: film        # film | adaln | adaln_zero
   dropout: 0.0
 train:
   device: cuda
