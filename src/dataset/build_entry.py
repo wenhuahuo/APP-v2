@@ -109,9 +109,11 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
 
     alpha = internal["fields"]["alpha.water"].astype(np.float64)
     # MULES 的有界性有残差：实测高 Fr 粗网格算例（npl_round_bilge，Fr 0.40）末态
-    # 有 0.2% 单元落在 1 + 2.3e-4，2.7% 单元落在 -2.9e-7；alpha = 0.5 等值面不受影响。
-    # 这里只拦明显越界（1e-3）
-    if alpha.min() < -1e-3 or alpha.max() > 1.0 + 1e-3:
+    # 有 0.2% 单元落在 1 + 2.3e-4，2.7% 单元落在 -2.9e-7。FFD 变形网格上残差更大：
+    # `wide_beam`（半宽 +20%）有 3.9% 的迭代步出现 alpha > 1.001、末态最大 1.00112，
+    # `fat_hull`（半宽/吃水 +12%）最大 1.00145。越界都在 1.0 附近，alpha = 0.5
+    # 等值面不受影响，容差按实测放到 2e-3
+    if alpha.min() < -1e-3 or alpha.max() > 1.0 + 2e-3:
         raise ValueError(f"{entry_id} 的 alpha.water 越界: [{alpha.min()}, {alpha.max()}]")
     velocity = internal["fields"]["U"].astype(np.float64)
     pressure = internal["fields"]["p_rgh"].astype(np.float64)
