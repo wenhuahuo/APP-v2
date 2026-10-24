@@ -51,7 +51,8 @@ def case_parameters(bundle):
             "rho": condition["rho"],
             "nu": condition["nu"],
             "scale": manifest["mesh_scale_to_kcs"],
-            "end_time": manifest.get("end_time"),
+            # 批量船型把物理时长记在 condition.end_time_s（顶层 end_time 只有 KCS 旧 schema 有）
+            "end_time": condition.get("end_time_s"),
         }
     reference = json.loads((bundle / "kcs_reference.json").read_text())
     parts = manifest["run"].split("_")
