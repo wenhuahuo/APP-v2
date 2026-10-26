@@ -1,4 +1,4 @@
-# 划分 lofo_fr_design（leave_one_fr_scale_out，留出 fr_scale=1.0（设计 Fr））：train 50 / val 10；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
+# 划分 lofo_fr_design（leave_one_fr_scale_out，留出 fr_scale=1.0（设计 Fr））：train 55 / val 11；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
 stats: dataset/stats_lofo_fr_design.json
 model_type: appsolver_oformer
 model:
@@ -39,6 +39,11 @@ train:
   - frigate_fr036_normal_mesh
   - frigate_fr042_normal_mesh
   - frigate_fr048_normal_mesh
+  - kcs_fr031_normal_mesh
+  - kcs_fr036_normal_mesh
+  - kcs_fr042_normal_mesh
+  - kcs_fr047_normal_mesh
+  - kcs_fr052_normal_mesh
   - kvlcc2_fr009_normal_mesh
   - kvlcc2_fr011_normal_mesh
   - kvlcc2_fr017_normal_mesh
@@ -89,6 +94,7 @@ train:
   - containership_fr022_normal_mesh
   - dtc_fr022_normal_mesh
   - frigate_fr030_normal_mesh
+  - kcs_fr026_normal_mesh
   - kvlcc2_fr014_normal_mesh
   - npl_round_bilge_4a_fr040_normal_mesh
   - npl_round_bilge_fr040_normal_mesh

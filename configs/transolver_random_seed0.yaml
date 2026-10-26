@@ -1,4 +1,4 @@
-# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 51 / val 9；其余超参与 transolver_multihull_normal.yaml 一致
+# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 56 / val 10；其余超参与 transolver_multihull_normal.yaml 一致
 stats: dataset/stats_random_seed0.json
 model_type: transolver
 model:
@@ -14,47 +14,51 @@ train:
   entries:
   - containership_fr013_normal_mesh
   - containership_fr018_normal_mesh
+  - containership_fr022_normal_mesh
   - containership_fr026_normal_mesh
-  - containership_fr031_normal_mesh
   - containership_fr035_normal_mesh
   - dtc_fr013_normal_mesh
   - dtc_fr017_normal_mesh
   - dtc_fr022_normal_mesh
   - dtc_fr026_normal_mesh
   - dtc_fr031_normal_mesh
+  - dtc_fr035_normal_mesh
   - frigate_fr018_normal_mesh
   - frigate_fr024_normal_mesh
   - frigate_fr030_normal_mesh
   - frigate_fr036_normal_mesh
   - frigate_fr042_normal_mesh
   - frigate_fr048_normal_mesh
+  - kcs_fr026_normal_mesh
+  - kcs_fr031_normal_mesh
+  - kcs_fr036_normal_mesh
+  - kcs_fr042_normal_mesh
+  - kcs_fr047_normal_mesh
+  - kcs_fr052_normal_mesh
   - kvlcc2_fr009_normal_mesh
   - kvlcc2_fr011_normal_mesh
   - kvlcc2_fr014_normal_mesh
   - kvlcc2_fr017_normal_mesh
-  - kvlcc2_fr020_normal_mesh
-  - kvlcc2_fr023_normal_mesh
   - npl_round_bilge_4a_fr024_normal_mesh
-  - npl_round_bilge_4a_fr032_normal_mesh
   - npl_round_bilge_4a_fr040_normal_mesh
   - npl_round_bilge_4a_fr045_normal_mesh
+  - npl_round_bilge_4a_fr055_normal_mesh
   - npl_round_bilge_fr024_normal_mesh
   - npl_round_bilge_fr032_normal_mesh
+  - npl_round_bilge_fr040_normal_mesh
   - npl_round_bilge_fr045_normal_mesh
+  - npl_round_bilge_fr050_normal_mesh
   - npl_round_bilge_fr055_normal_mesh
   - s175_fr017_normal_mesh
   - s175_fr023_normal_mesh
   - s175_fr029_normal_mesh
-  - s175_fr034_normal_mesh
   - s175_fr046_normal_mesh
   - series60_fr013_normal_mesh
   - series60_fr018_normal_mesh
   - series60_fr022_normal_mesh
-  - series60_fr026_normal_mesh
   - series60_fr031_normal_mesh
   - series60_fr035_normal_mesh
   - wigley_fr018_normal_mesh
-  - wigley_fr024_normal_mesh
   - wigley_fr030_normal_mesh
   - wigley_fr036_normal_mesh
   - wigley_fr042_normal_mesh
@@ -62,7 +66,8 @@ train:
   - workboat_fr018_normal_mesh
   - workboat_fr024_normal_mesh
   - workboat_fr030_normal_mesh
-  - workboat_fr036_normal_mesh
+  - workboat_fr042_normal_mesh
+  - workboat_fr048_normal_mesh
   train_strides:
   - 1
   - 2
@@ -75,12 +80,13 @@ train:
   lambda_hull: 1.0
   seed: 0
   val_entries:
-  - containership_fr022_normal_mesh
-  - dtc_fr035_normal_mesh
+  - containership_fr031_normal_mesh
+  - kvlcc2_fr020_normal_mesh
+  - kvlcc2_fr023_normal_mesh
+  - npl_round_bilge_4a_fr032_normal_mesh
   - npl_round_bilge_4a_fr050_normal_mesh
-  - npl_round_bilge_4a_fr055_normal_mesh
-  - npl_round_bilge_fr040_normal_mesh
-  - npl_round_bilge_fr050_normal_mesh
+  - s175_fr034_normal_mesh
   - s175_fr040_normal_mesh
-  - workboat_fr042_normal_mesh
-  - workboat_fr048_normal_mesh
+  - series60_fr026_normal_mesh
+  - wigley_fr024_normal_mesh
+  - workboat_fr036_normal_mesh

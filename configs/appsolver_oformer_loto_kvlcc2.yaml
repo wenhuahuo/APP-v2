@@ -1,4 +1,4 @@
-# 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 54 / val 6；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
+# 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 60 / val 6；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
 stats: dataset/stats_loto_kvlcc2.json
 model_type: appsolver_oformer
 model:
@@ -42,6 +42,12 @@ train:
   - frigate_fr036_normal_mesh
   - frigate_fr042_normal_mesh
   - frigate_fr048_normal_mesh
+  - kcs_fr026_normal_mesh
+  - kcs_fr031_normal_mesh
+  - kcs_fr036_normal_mesh
+  - kcs_fr042_normal_mesh
+  - kcs_fr047_normal_mesh
+  - kcs_fr052_normal_mesh
   - npl_round_bilge_4a_fr024_normal_mesh
   - npl_round_bilge_4a_fr032_normal_mesh
   - npl_round_bilge_4a_fr040_normal_mesh
