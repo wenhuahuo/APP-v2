@@ -19,11 +19,24 @@ WORK=$OUT/$NAME
 
 [[ -n "$NAME" && "$WORK" == "$OUT"/* ]] || { echo "输出路径异常: $WORK" >&2; exit 2; }
 
-if ! command -v module >/dev/null 2>&1; then
+# 集群走 module（非交互 shell 要先 source 一次 module 初始化），
+# 租用服务器没有 module，由 OPENFOAM_BASHRC 指定 bashrc
+if ! command -v module >/dev/null 2>&1 && [[ -f /etc/profile.d/openscow-modules.sh ]]; then
   source /etc/profile.d/openscow-modules.sh
 fi
-module purge
-module load openfoam/v2506
+if command -v module >/dev/null 2>&1; then
+  module purge
+  module load openfoam/v2506
+elif [[ -n "${OPENFOAM_BASHRC:-}" ]]; then
+  # OpenFOAM 的 setup 脚本末尾会返回非零，触发 set -e；结束后统一校验
+  set +e
+  source "$OPENFOAM_BASHRC"
+  set -e
+  [[ -n "${WM_PROJECT_DIR:-}" ]] || { echo "OpenFOAM 环境未就绪（$OPENFOAM_BASHRC）" >&2; exit 2; }
+else
+  echo "找不到 OpenFOAM 环境：既没有 module，也没有设 OPENFOAM_BASHRC" >&2
+  exit 2
+fi
 
 # foamToVTK 需要可写的算例目录；用符号链接把只读的算例内容挂进工作目录，
 # 使 VTK/ 落在导出区而不是算例目录
