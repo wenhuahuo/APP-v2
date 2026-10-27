@@ -1,7 +1,7 @@
 """校验数据集条目的文件清单与数组一致性，并打印诊断量。
 
 用法:
-    python3 src/dataset/validate_entry.py [--dataset dataset] [entry-id ...]
+    python3 src/dataset/validate_entry.py [--dataset dataset/shipbench] [entry-id ...]
 """
 
 import argparse
@@ -88,7 +88,7 @@ def validate(dataset_root, entry_id):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", default="dataset")
+    parser.add_argument("--dataset", default="dataset/shipbench")
     parser.add_argument("entries", nargs="*", help="条目 id，默认校验 index.json 中全部条目")
     args = parser.parse_args()
 

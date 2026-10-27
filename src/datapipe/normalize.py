@@ -1,7 +1,7 @@
 """带求积权重的逐通道标准化。
 
 流场目标按格点求积权重统计，船面压力按顶点面积权重统计，条件输入按条目等权统计。
-统计量只在训练集上拟合并存成 `dataset/stats.json`，验证与测试复用同一份。
+统计量只在训练集上拟合并存成 `dataset/shipbench/stats.json`，验证与测试复用同一份。
 目标在 `ShipDataset` 里已无量纲化，这里只做平移缩放。
 """
 
@@ -11,7 +11,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-DEFAULT_PATH = Path(__file__).resolve().parents[2] / "dataset" / "stats.json"
+DEFAULT_PATH = (Path(__file__).resolve().parents[2] / "dataset" / "shipbench"
+                / "stats.json")
 
 
 def _weighted_moments(values, weights, mask):

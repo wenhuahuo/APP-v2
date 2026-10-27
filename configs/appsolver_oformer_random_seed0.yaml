@@ -1,5 +1,5 @@
 # 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 56 / val 10；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
-stats: dataset/stats_random_seed0.json
+stats: dataset/shipbench/stats_random_seed0.json
 model_type: appsolver_oformer
 model:
   flow_size_tiers:
@@ -22,7 +22,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries:
   - containership_fr013_normal_mesh
   - containership_fr018_normal_mesh

@@ -1,7 +1,7 @@
 # APP 分词 + OFormer 主干：KCS Fr=0.26 normal 网格条目既作训练集也作验证集（1.23 M 参数）
 # 与 OFormer 基线只差分词方式（逐点 → APP patch token），参数量与训练超参与之一致，
 # 用来验证分词器即插即用。
-stats: dataset/stats.json
+stats: dataset/shipbench/stats.json
 model_type: appsolver_oformer
 model:
   flow_size_tiers: [[0.05, 0.02], [0.2, 0.05], [null, 0.15]]
@@ -18,7 +18,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries: [kcs_fr026_normal_mesh]
   train_strides: [1, 2]
   epochs: 100

@@ -1,5 +1,5 @@
 # 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 60 / val 6；其余超参与 appsolver_v1_multihull_normal.yaml 一致
-stats: dataset/stats_loto_kvlcc2.json
+stats: dataset/shipbench/stats_loto_kvlcc2.json
 model_type: appsolver_v1
 model:
   patch_size: 64
@@ -11,7 +11,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries:
   - containership_fr013_normal_mesh
   - containership_fr018_normal_mesh

@@ -1,5 +1,5 @@
 # 划分 lofo_fr_design（leave_one_fr_scale_out，留出 fr_scale=1.0（设计 Fr））：train 55 / val 11；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
-stats: dataset/stats_lofo_fr_design.json
+stats: dataset/shipbench/stats_lofo_fr_design.json
 model_type: appsolver_oformer
 model:
   flow_size_tiers:
@@ -22,7 +22,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries:
   - containership_fr013_normal_mesh
   - containership_fr018_normal_mesh

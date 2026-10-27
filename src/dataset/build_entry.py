@@ -2,7 +2,7 @@
 
 用法:
     python3 src/dataset/build_entry.py --bundle dataset/.build_cache/<source-case> \
-        --dataset dataset
+        --dataset dataset/shipbench
 """
 
 import argparse
@@ -231,7 +231,7 @@ def update_index(dataset_root, meta):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", required=True, help="集群导出包目录")
-    parser.add_argument("--dataset", default="dataset", help="数据集根目录")
+    parser.add_argument("--dataset", default="dataset/shipbench", help="数据集根目录")
     args = parser.parse_args()
 
     meta = build_entry(args.bundle, args.dataset)

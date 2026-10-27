@@ -41,8 +41,8 @@ def main():
                        if not line.startswith("#"))
         for name, split in splits.items():
             derived = text
-            derived = derived.replace("stats: dataset/stats.json",
-                                      f"stats: dataset/stats_{name}.json")
+            derived = derived.replace("stats: dataset/shipbench/stats.json",
+                                      f"stats: dataset/shipbench/stats_{name}.json")
             derived = replace_block(derived, "entries", split["train"])
             derived = replace_block(derived, "val_entries", split["val"])
             header = (f"# 划分 {name}（{split['protocol']}，留出 {split['holdout']}）："

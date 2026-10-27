@@ -1,13 +1,13 @@
-"""把 11 个船型的船体 STL 收拢到 dataset/hull_stl/ 并生成 manifest.json。
+"""把 11 个船型的船体 STL 收拢到 dataset/classic_hulls/ 并生成 manifest.json。
 
 用法:
     python3 scripts/dataset_build/collect_hull_stl.py
 
 船型来源是 NurbsShipGen 的 classic_hulls。多数 STL 是毫米量级、还带多余几何，
 与数据集的坐标约定（米制、x∈[0,Lpp]、整船 y 双向、龙骨 z=0）不一致，因此逐个
-用 bbox 与设计条目 meta.json 的 Lpp/T 对账，并与 dataset/.build_cache/ 里该算例
-实际使用的 `<hull>_Hull.stl.gz` 比对 bbox：一致就复制 NurbsShipGen 版本，不一致
-以 .build_cache 版本为准。
+用 bbox 与设计条目（`dataset/shipbench/<entry-id>/meta.json`）的 Lpp/T 对账，并与
+dataset/.build_cache/ 里该算例实际使用的 `<hull>_Hull.stl.gz` 比对 bbox：一致就复制
+NurbsShipGen 版本，不一致以 .build_cache 版本为准。
 """
 
 import argparse
@@ -103,11 +103,11 @@ def build_cache_stl(build_cache, source_case):
     return found[0]
 
 
-def collect(dataset_root, out_dir, build_cache, nurbs_root, skip_copy=False):
+def collect(entries_root, out_dir, build_cache, nurbs_root, skip_copy=False):
     records = {}
     rows = []
     for hull, (subdir, name) in NURBS_STL.items():
-        meta = json.loads((dataset_root / DESIGN_ENTRY[hull] / "meta.json").read_text())
+        meta = json.loads((entries_root / DESIGN_ENTRY[hull] / "meta.json").read_text())
         lpp, draft = float(meta["Lpp"]), float(meta["T"])
         nurbs = read_stl(nurbs_root / subdir / name)
         nurbs_ok, nurbs_note = span_check(nurbs, lpp, draft)
@@ -168,14 +168,20 @@ def collect(dataset_root, out_dir, build_cache, nurbs_root, skip_copy=False):
 
 def main():
     parser = argparse.ArgumentParser(description="收集 11 个船型的船体 STL")
-    parser.add_argument("--dataset", default=str(ROOT / "dataset"))
+    parser.add_argument("--dataset", default=str(ROOT / "dataset"),
+                        help="数据集根目录，.build_cache/ 与 shipbench/ 都在它下面")
+    parser.add_argument("--entries", default=None,
+                        help="条目根目录，默认 <dataset>/shipbench")
+    parser.add_argument("--out", default=None,
+                        help="经典船型 STL 输出目录，默认 <dataset>/classic_hulls")
     parser.add_argument("--nurbs-root", default=str(NURBS_ROOT))
     parser.add_argument("--skip-copy", action="store_true", help="只打印验证表，不复制")
     args = parser.parse_args()
 
     dataset_root = Path(args.dataset)
-    out_dir = dataset_root / "hull_stl"
-    records = collect(dataset_root, out_dir, dataset_root / ".build_cache",
+    entries_root = Path(args.entries) if args.entries else dataset_root / "shipbench"
+    out_dir = Path(args.out) if args.out else dataset_root / "classic_hulls"
+    records = collect(entries_root, out_dir, dataset_root / ".build_cache",
                       Path(args.nurbs_root), args.skip_copy)
     if args.skip_copy:
         return

@@ -1,7 +1,7 @@
 # OFormer（逐点线性注意力）：KCS 单船型 6 个 Fr 的 normal 网格条目，留一 Fr 验证（Fr=0.416）
 # 训练集 kcs_fr026/031/036/047/052_normal_mesh（Fr 0.260 / 0.312 / 0.364 / 0.468 / 0.520）
 # 验证集 kcs_fr042_normal_mesh（Fr=0.416，落在训练 Fr 范围内的内插工况）
-stats: dataset/stats_kcs_fr_sweep.json
+stats: dataset/shipbench/stats_kcs_fr_sweep.json
 model_type: oformer
 model:
   d_model: 128
@@ -16,7 +16,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries:
   - kcs_fr026_normal_mesh
   - kcs_fr031_normal_mesh

@@ -1,7 +1,7 @@
 # Transolver 基线（32 个 slice）：KCS Fr=0.26 normal 网格条目既作训练集也作验证集（1.19 M 参数）
 # 基线不含 APP 的物理尺寸分词与查询解码器：整片点云直接进、同一批点直接出，
 # 训练超参与 APP 加宽主干一致。
-stats: dataset/stats.json
+stats: dataset/shipbench/stats.json
 model_type: transolver
 model:
   d_model: 208
@@ -12,7 +12,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries: [kcs_fr026_normal_mesh]
   train_strides: [1, 2]
   epochs: 100

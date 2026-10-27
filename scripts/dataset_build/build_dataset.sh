@@ -10,5 +10,5 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 for name in "$@"; do
   python3 "$ROOT/src/dataset/build_entry.py" \
     --bundle "$ROOT/dataset/.build_cache/$name" \
-    --dataset "$ROOT/dataset"
+    --dataset "$ROOT/dataset/shipbench"
 done

@@ -1,7 +1,7 @@
-"""在训练集条目上拟合归一化统计量，写 dataset/stats.json。
+"""在训练集条目上拟合归一化统计量，写 dataset/shipbench/stats.json。
 
 用法:
-    python3 scripts/datapipe/build_stats.py --dataset dataset \
+    python3 scripts/datapipe/build_stats.py --dataset dataset/shipbench \
         --entries kcs_fr026_normal_mesh
 """
 
@@ -18,7 +18,7 @@ from ship_dataset import ShipDataset  # noqa: E402
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", default=str(ROOT / "dataset"))
+    parser.add_argument("--dataset", default=str(ROOT / "dataset" / "shipbench"))
     parser.add_argument("--entries", nargs="*", default=None,
                         help="训练集条目 id，默认取 index.json 的全部条目")
     parser.add_argument("--output", default=None, help="默认 <dataset>/stats.json")

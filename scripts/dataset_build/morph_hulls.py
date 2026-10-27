@@ -6,9 +6,9 @@
     python3 scripts/dataset_build/morph_hulls.py --hull-a kvlcc2 --hull-b wigley \
         --weights 0.5 --n-u 200 --n-v 80
 
-产物写 `output/ship_morphing/<hull-a>_<hull-b>/`：每个权重一个
+产物写 `dataset/morphed_hulls/<hull-a>_<hull-b>/`：每个权重一个
 `morphed_w<三位整数weight>.stl`（如 `morphed_w050.stl`），元信息汇总在
-`morph_meta.json`。
+`morph_meta.json`。母船 STL 取自 `dataset/classic_hulls/manifest.json`。
 """
 
 import argparse
@@ -25,7 +25,7 @@ from hull_morph import morph_hulls  # noqa: E402
 
 
 def load_manifest(dataset_root):
-    path = dataset_root / "hull_stl" / "manifest.json"
+    path = dataset_root / "classic_hulls" / "manifest.json"
     if not path.exists():
         raise FileNotFoundError(f"缺少 {path}，先跑 scripts/dataset_build/collect_hull_stl.py")
     return json.loads(path.read_text())
@@ -44,16 +44,16 @@ def main():
     parser.add_argument("--n-u", type=int, default=160, help="公共 UV 网格的 u 格点数")
     parser.add_argument("--n-v", type=int, default=60, help="公共 UV 网格的 v 格点数")
     parser.add_argument("--dataset", default=str(ROOT / "dataset"))
-    parser.add_argument("--output", default=str(ROOT / "output" / "ship_morphing"))
+    parser.add_argument("--output", default=str(ROOT / "dataset" / "morphed_hulls"))
     args = parser.parse_args()
 
     manifest = load_manifest(Path(args.dataset))
     for hull in (args.hull_a, args.hull_b):
         if hull not in manifest:
-            raise KeyError(f"{hull} 不在 {args.dataset}/hull_stl/manifest.json 里")
+            raise KeyError(f"{hull} 不在 {args.dataset}/classic_hulls/manifest.json 里")
     hull_a, hull_b = manifest[args.hull_a], manifest[args.hull_b]
-    stl_a = Path(args.dataset) / "hull_stl" / hull_a["stl"]
-    stl_b = Path(args.dataset) / "hull_stl" / hull_b["stl"]
+    stl_a = Path(args.dataset) / "classic_hulls" / hull_a["stl"]
+    stl_b = Path(args.dataset) / "classic_hulls" / hull_b["stl"]
 
     out_dir = Path(args.output) / f"{args.hull_a}_{args.hull_b}"
     out_dir.mkdir(parents=True, exist_ok=True)

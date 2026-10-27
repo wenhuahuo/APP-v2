@@ -14,7 +14,7 @@ from appsolver_v2 import APPSolverV2  # noqa: E402
 from collate import collate_samples  # noqa: E402
 from ship_dataset import ShipDataset  # noqa: E402
 
-DATASET = ROOT / "dataset"
+DATASET = ROOT / "dataset" / "shipbench"
 ENTRY = "kcs_fr026_normal_mesh"
 QUERY_COUNT = 256
 

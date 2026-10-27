@@ -1,7 +1,7 @@
 # OFormer（逐点线性注意力）：4 船型训练 / 2 船型验证的多船型数据集（normal 网格）
 # 训练集 kcs_fr026_normal_mesh, dtc_fr022_normal_mesh, series60_fr022_normal_mesh, containership_fr022_normal_mesh
 # 验证集 s175_fr029_normal_mesh, kvlcc2_fr014_normal_mesh
-stats: dataset/stats.json
+stats: dataset/shipbench/stats.json
 model_type: oformer
 model:
   d_model: 128
@@ -16,7 +16,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries:
   - kcs_fr026_normal_mesh
   - dtc_fr022_normal_mesh

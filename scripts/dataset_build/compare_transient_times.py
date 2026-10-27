@@ -5,7 +5,7 @@
         --bundle-root ~/dataset_export_time_check --case-root ~/Documents/OpenFoamWorks/APPSolver-v2-Dataset \
         --cases kcs_normal_mesh_25s kcs_fr520_normal_mesh_25s \
         --times 15 20 25 --reference 25 --reference-json kcs_reference.json \
-        --dataset dataset --out times.json
+        --dataset dataset/shipbench --out times.json
 
 流场走与 `src/dataset/build_entry.py` 相同的重建路径（alpha.water = 0.5 等值面 +
 单元内插值），船面压力走面心到顶点的面积加权插值。以最末时刻为参考，其余时刻与

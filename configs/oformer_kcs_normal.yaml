@@ -1,7 +1,7 @@
 # OFormer 基线：KCS Fr=0.26 normal 网格条目既作训练集也作验证集（1.23 M 参数）
 # 与其它基线一样整片点云进模型，但它自带查询解码器（几何编码 + 交叉注意力取值），
 # 因此是第二个分辨率无关算子；训练超参与 APP 加宽主干一致。
-stats: dataset/stats.json
+stats: dataset/shipbench/stats.json
 model_type: oformer
 model:
   d_model: 128
@@ -16,7 +16,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries: [kcs_fr026_normal_mesh]
   train_strides: [1, 2]
   epochs: 100

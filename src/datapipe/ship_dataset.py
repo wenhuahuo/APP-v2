@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-DEFAULT_ROOT = Path(__file__).resolve().parents[2] / "dataset"
+DEFAULT_ROOT = Path(__file__).resolve().parents[2] / "dataset" / "shipbench"
 
 
 def _tensor(array):

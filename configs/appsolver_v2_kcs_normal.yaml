@@ -1,5 +1,5 @@
 # APPSolver-v2 冒烟训练：KCS Fr=0.26 normal 网格条目既作训练集也作验证集
-stats: dataset/stats.json
+stats: dataset/shipbench/stats.json
 model_type: appsolver_v2
 
 model:
@@ -17,7 +17,7 @@ model:
 
 train:
   device: cpu
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries: [kcs_fr026_normal_mesh]
   train_strides: [1, 2]
   epochs: 30

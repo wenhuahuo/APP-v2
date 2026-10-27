@@ -77,7 +77,7 @@ def app_tokens(config_path, dataset, entry):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configs", nargs="*", default=list(DEFAULT_CONFIGS))
-    parser.add_argument("--dataset", default=str(ROOT / "dataset"))
+    parser.add_argument("--dataset", default=str(ROOT / "dataset" / "shipbench"))
     parser.add_argument("--entry", default="kcs_fr026_normal_mesh")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--json", default=None, help="把结果写进这个 json")

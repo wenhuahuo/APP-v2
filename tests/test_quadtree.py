@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT / "src" / "datapipe"))
 from quadtree import build_partition, tiered_tolerance  # noqa: E402
 from ship_dataset import ShipDataset  # noqa: E402
 
-DATASET = ROOT / "dataset"
+DATASET = ROOT / "dataset" / "shipbench"
 ENTRY = "kcs_fr026_normal_mesh"
 SPACING = 0.01
 TIERS = [[0.5, 0.02], [0.9, 0.05], [None, 0.15]]

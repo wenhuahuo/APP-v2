@@ -17,13 +17,13 @@ ssh <cluster> 'bash export_case_vtk.sh ~/Documents/OpenFoamWorks/APPSolver-v2-Da
 # 2. 本地：同步导出包到 dataset/.build_cache/
 bash scripts/data_raw_export/sync_case.sh kcs_normal_mesh_25s
 
-# 3. 组装数据集条目并刷新 dataset/index.json
+# 3. 组装数据集条目并刷新 dataset/shipbench/index.json
 bash scripts/dataset_build/build_dataset.sh kcs_normal_mesh_25s kcs_sparse_mesh_25s
 
 # 4. 校验条目
 python3 src/dataset/validate_entry.py
 
-# 5. 拟合归一化统计量（只含训练集条目）
+# 5. 拟合归一化统计量（只含训练集条目，写 dataset/shipbench/stats.json）
 python3 scripts/datapipe/build_stats.py --entries kcs_fr026_normal_mesh
 
 # 6. 训练（当前只有一条条目，训练集同时作验证集）
@@ -34,6 +34,17 @@ python3 vis/kcs_flow_and_press/plot_flow_and_pressure.py
 python3 vis/kcs_hull_uv/plot_hull_uv.py
 python3 vis/kcs_flow_sdf/plot_flow_sdf.py
 ```
+
+## 目录布局
+
+`dataset/` 整个目录不入 git，分四块：
+
+| 路径 | 内容 |
+| --- | --- |
+| `dataset/shipbench/` | 神经算子训练数据集：`index.json`、`stats*.json` 与 `<entry-id>/` 条目目录 |
+| `dataset/classic_hulls/` | 11 个经典船型的船体 STL 与 `manifest.json`（船型融合的母船） |
+| `dataset/morphed_hulls/` | 融合船型产物 `<a>_<b>/{morphed_w*.stl,morph_meta.json}` |
+| `dataset/.build_cache/` | 集群导出的中间 VTK，重新组装条目时才用 |
 
 ## 当前条目
 

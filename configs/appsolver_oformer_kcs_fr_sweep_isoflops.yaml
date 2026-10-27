@@ -1,7 +1,7 @@
 # appsolver_oformer：等计算量（iso-FLOPs）对照，前向 239.9 GFLOPs、1.705 M 参数
 # KCS 单船型 6 个 Fr，训练 kcs_fr026/031/036/047/052_normal_mesh，验证 kcs_fr042（Fr=0.416）
 # 与 appsolver_oformer_kcs_fr_sweep 的唯一差别是容量超参（对齐到 APP 主线的 248 G）与 50 epoch
-stats: dataset/stats_kcs_fr_sweep.json
+stats: dataset/shipbench/stats_kcs_fr_sweep.json
 model_type: appsolver_oformer
 model:
   flow_size_tiers:
@@ -24,7 +24,7 @@ model:
   dropout: 0.0
 train:
   device: cuda
-  dataset_root: dataset
+  dataset_root: dataset/shipbench
   entries:
   - kcs_fr026_normal_mesh
   - kcs_fr031_normal_mesh
