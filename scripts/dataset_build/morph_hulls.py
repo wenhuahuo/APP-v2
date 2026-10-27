@@ -71,8 +71,11 @@ def main():
         results[stl_name] = meta
         print(f"{stl_name}: {meta['n_points']} 点 {meta['n_faces']} 面  "
               f"Lpp={meta['Lpp_new']:.4f} T={meta['T_new']:.4f} "
-              f"体积={meta['volume']:.4f} 插值体积={meta['volume_interp']:.4f} "
-              f"相对差={meta['volume_rel_diff'] * 100:+.2f}%")
+              f"体积={meta['volume']:.4f}  "
+              f"归一化插值={meta['volume_interp_norm']:.4f} "
+              f"({meta['volume_rel_diff_norm'] * 100:+.2f}%)  "
+              f"物理体积插值={meta['volume_interp']:.4f} "
+              f"({meta['volume_rel_diff'] * 100:+.2f}%)")
 
     summary = {
         "hull_a": args.hull_a,
