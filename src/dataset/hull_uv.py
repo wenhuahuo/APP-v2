@@ -41,7 +41,8 @@ def _girth_profile(u, distance, n_bins=400):
     index = np.clip(np.digitize(u, bins) - 1, 0, n_bins - 1)
     girth = np.zeros(n_bins)
     np.maximum.at(girth, index, distance)
-    filled = np.bincount(index, minlength=n_bins) > 0
+    # 弧长为 0 的站位只有龙骨上的点，没有剖面可量，按空站位处理（否则会除以 0）
+    filled = (np.bincount(index, minlength=n_bins) > 0) & (girth > 0)
 
     centre = 0.5 * (bins[:-1] + bins[1:])
     profile = np.interp(centre, centre[filled], girth[filled])
