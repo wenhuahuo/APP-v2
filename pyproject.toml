@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.8",
     "scipy>=1.13",
     "trimesh>=4.0",
+    "shapely>=2.0",
     "torch>=2.0",
 ]
 
