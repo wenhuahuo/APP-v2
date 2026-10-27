@@ -43,7 +43,7 @@ python3 vis/kcs_flow_sdf/plot_flow_sdf.py
 | --- | --- |
 | `dataset/shipbench/` | 神经算子训练数据集：`index.json`、`stats*.json` 与 `<entry-id>/` 条目目录 |
 | `dataset/classic_hulls/` | 11 个经典船型的船体 STL 与 `manifest.json`（船型融合的母船） |
-| `dataset/morphed_hulls/` | 融合船型产物 `<a>_<b>/{morphed_w*.stl,morph_meta.json}` |
+| `dataset/morphed_hulls/` | 融合船型产物 `<a>_<b>/{<a>_<b>_w*.stl,morph_meta.json}`（水密全船 STL） |
 | `dataset/.build_cache/` | 集群导出的中间 VTK，重新组装条目时才用 |
 
 ## 当前条目
