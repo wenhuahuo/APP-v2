@@ -100,16 +100,27 @@ def mother_ratios(entry):
 
 
 def check_closure(path):
-    """封闭性：水密、单连通、封闭体积为正。"""
+    """封闭性：水密、单连通、封闭体积为正，并数零面积面。
+
+    零面积面来自首尾封口的「拉链」条带：封口是竖直平面，甲板（水平面）与它的交是
+    一条线，所以拉链在甲板行上必然给出零面积的三角形——这些面是保持边流形（每条边
+    恰好两个面片）所必需的，几何上不占面积。count 只记录、不作判据。
+    """
     mesh = trimesh.load(str(path), force="mesh")
     mesh.merge_vertices()
     volume = float(mesh.volume) if mesh.is_volume else None
+    triangle = np.asarray(mesh.vertices)[np.asarray(mesh.faces)]
+    area = 0.5 * np.linalg.norm(
+        np.cross(triangle[:, 1] - triangle[:, 0],
+                 triangle[:, 2] - triangle[:, 0]), axis=1)
     return {"watertight": bool(mesh.is_watertight),
             "n_components": int(mesh.body_count),
             "is_volume": bool(mesh.is_volume),
             "volume_m3": volume,
             "n_triangles": int(len(mesh.faces)),
-            "n_vertices": int(len(mesh.vertices))}
+            "n_vertices": int(len(mesh.vertices)),
+            "n_zero_area_faces": int((area <= 0.0).sum()),
+            "min_face_area_m2": float(area.min()) if len(area) else None}
 
 
 def station_chains(path, lpp, n_stations=N_STATIONS):
@@ -163,6 +174,9 @@ def station_smoothness(path, meta, n_u, n_v, n_v2):
     平滑曲面上它只有 O(Δu²) 的曲率量级，选链逐站翻转时会跳到几个 % L。统计分两个
     口径：船中段 `u ∈ (12%, 88%)`（告警用）与宽口径 `u ∈ (5%, 95%)`（记录用）——
     两端各 12% 是艉封板/艏柱，剖面下端本来就要抬离龙骨线，是真实端部形状。
+
+    u 取 `hull_station_grid` 返回的站位参数：艏区是绕竖直枢轴旋转的平面，站位的 x
+    不再逐站递增，不能再拿 `grid[..., 0]` 当 u。
     """
     lpp = float(meta["L_ref_m"])
     draft = float(meta["T_m"])
@@ -185,8 +199,8 @@ def station_smoothness(path, meta, n_u, n_v, n_v2):
                 "max_fold_wide_over_L_ref": None,
                 "max_overall_fold_over_L_ref": None}
 
-    width = grid[-1, 0, 0] - grid[0, 0, 0]
-    u_of_station = (grid[:, 0, 0] - grid[0, 0, 0]) / width if width else np.zeros(n_u)
+    u_of_station = surface["u"]
+    nominal_x = surface["x"]
     middle = (u_of_station[:-1] > END_FRACTION) & (u_of_station[:-1] < 1.0 - END_FRACTION)
     assert len(middle) == len(jump)
 
@@ -194,7 +208,7 @@ def station_smoothness(path, meta, n_u, n_v, n_v2):
         """values 可能是被掩码抽出来的子集，station_map 把它映回原站位下标。"""
         position, row_index = np.unravel_index(np.nanargmax(values), values.shape)
         station_index = int(station_map[position])
-        span = grid[station_index + 1, 0, 0] - grid[station_index, 0, 0]
+        span = nominal_x[station_index + 1] - nominal_x[station_index]
         maximum = float(values[position, row_index])
         return {"m": maximum, "over": maximum / lpp,
                 "slope": maximum / float(span) if span else None,

@@ -10,11 +10,22 @@ OpenFOAM 的 snappyHexMesh 需要完整封闭船体，所以融合船的输出�
 2. u ∈ [0, 1] 按**每船自身曲面 x 范围**归一，共 n_u 个站位，端点内缩
    `STATION_EPS`。球鼻艏伸出 FP 的部分与艉突出都算进来，两船因此是艏尖对艏尖、
    艉端对艉端的对齐；
-3. 每个站位用平面-网格交线取剖面折线 (y, z)，整理成**从龙骨到甲板中线**的有序
-   路径：端点用最近邻行走串起来，多段剖面（平底船的底部分段、球鼻艏过渡区、
+3. 每个站位用平面-网格交线取剖面折线（平面局部坐标 (r, z)），整理成**从龙骨到
+   甲板中线**的有序路径：端点用最近邻行走串起来，多段剖面（平底船的底部分段、
    带附体的艉段）按「离路径尾端最近的端点」接到尾部，超过 `MAX_JOIN_FRACTION`
    的接不上就丢并计数；路径末端若回落到最高点以下（闭合环、挂在尾部的多余分叉）
-   在最后一个最高点截断；
+   在最后一个最高点截断。
+
+   **艏区改用竖直平面族**（`BOW_FAN_START`，照 ShipHullGAN 的艏部旋转剖面）：
+   `x = const` 的横切平面在带球鼻艏的船型上会把 x/L ≥ 0.97 的剖面切成「干舷外飘」
+   与「球鼻前缘」两条链，中间是真实凹槽，桥接后在艏部生成一堵竖直墙（dtc 的
+   w = 0 回代误差 2.8% L）。因此 u ≥ `BOW_FAN_START` 的站位换成一族**都过同一根
+   竖直枢轴** `(x_b, 0)` 的竖直平面：平面含 `e_z` 与水平方向
+   `u_hat(θ) = (−sin θ, cos θ, 0)`，θ 从 0（就是 `x = x_b`，与前一站同一条剖面）
+   按 `sin(πt/2)` 光滑加宽到 `90° − BOW_FAN_END_DEG`。这样每个站位的剖面都整体
+   落在艏区内（`x ≥ x_b`、`y ≤ 0`，一个点对应一个 θ），剖面不再双重连通；截面
+   仍是「u = 剖面序号、v = 剖面内弧长」的规则网格，只是格点的 x 不再固定。非艏区
+   `u_hat = e_y` 就退化成原来的 `x = const` 横切平面。
 4. v 分两段，各按段内弧长归一：段 1 龙骨 → 水线 v ∈ [0, 1]，段 2 水线 → 甲板中线
    v ∈ [1, 2]。水线位置由 z = T 与剖面折线的交点插值给出，因此 v = 1 一行严格在
    设计吃水上。公共网格 v 取 `n_v + n_v2 - 1` 行（默认 60 + 20 - 1 = 79 行）；
@@ -69,6 +80,16 @@ TOP_TOL_FRACTION = 1e-9
 SEAM_OFFSET_FRACTION = 6e-6
 # 镜像算子
 MIRROR = np.array([1.0, -1.0, 1.0])
+# 艏区起点（相对半船曲面 x 跨度）：u ≥ 该值的站位改用绕竖直枢轴旋转的竖直平面族，
+# 其余站位仍是 x = const 的横切平面。取 0.9 是因为球鼻艏与干舷外飘的凹槽落在艏部
+# 10% 船长里（dtc 的剖面从 x/L ≈ 0.98 起被切成两条链）
+BOW_FAN_START = 0.9
+# 艏区末站平面与中心面的夹角（度）。不能取 0：那时平面就是对称面，剖面整条落在
+# y = 0 上，镜像后与自身重合、出现零面积面；3° 时末站在艏尖处离中线约 3 cm
+BOW_FAN_END_DEG = 3.0
+# 艏区各站的龙骨行/甲板中线行对齐到艏区首站的容差（相对 Lpp）：这些行本来就是同一
+# 个点（都过竖直枢轴），差异只来自求交的浮点噪声
+PIVOT_SNAP_FRACTION = 1e-4
 
 
 def _compact(points, tris):
@@ -616,12 +637,63 @@ def _resample(path, n):
                             np.interp(v, s, path[unique, 1])])
 
 
+def station_frames(x_lo, x_hi, n_u, eps=STATION_EPS):
+    """每站的剖面平面：`origin` + 平面内水平方向 `u_hat`（含 `e_z`）+ 旋转角 `theta`。
+
+    非艏区（u < `BOW_FAN_START`）是 `x = const` 的横切平面：`origin = (x, 0, 0)`、
+    `u_hat = e_y`，点 = `origin + r·u_hat + z·e_z`，局部坐标 (r, z) 就是原来的
+    (y, z)。艏区是一族**都过同一根竖直枢轴** `(x_b, 0)` 的竖直平面：
+    `u_hat(θ) = (−sin θ, cos θ, 0)`，点 = `(x_b + |r| sin θ, r cos θ, z)`（r ≤ 0），
+    因此整个剖面都落在 `x ≥ x_b`、`y ≤ 0` 的艏区里，一个点对应一个 θ，剖面不会
+    双连通。θ = 0 的第一站就是 `x = x_b`，与前一站共用同一条剖面。
+
+    θ 按 `sin(πt/2)` 从 0 加到 `90° − BOW_FAN_END_DEG`：艏部甲板边线是往艏尖收敛的
+    曲线，等弧长分点要求越靠近艏尖站位越密（验算 dtc / kcs / containership 的
+    甲板边线，这条排布给出的甲板边 |y| 步长几乎是常数）。
+    """
+    u = np.linspace(0.0, 1.0, n_u)
+    x = x_lo + (eps + u * (1.0 - 2.0 * eps)) * (x_hi - x_lo)
+    origins = np.column_stack([x, np.zeros(n_u), np.zeros(n_u)])
+    u_hat = np.tile(np.array([0.0, 1.0, 0.0]), (n_u, 1))
+    theta = np.zeros(n_u)
+    hit = np.flatnonzero(u >= BOW_FAN_START)
+    fan_from = int(hit[0]) if len(hit) else n_u
+    if n_u - fan_from >= 2:
+        angle_max = np.deg2rad(90.0 - BOW_FAN_END_DEG)
+        t = np.linspace(0.0, 1.0, n_u - fan_from)
+        theta[fan_from:] = angle_max * np.sin(0.5 * np.pi * t)
+        origins[fan_from:, 0] = x[fan_from]
+        u_hat[fan_from:, 0] = -np.sin(theta[fan_from:])
+        u_hat[fan_from:, 1] = np.cos(theta[fan_from:])
+    elif fan_from < n_u:  # 只剩一站：无法形成平面族，留在横切平面上
+        fan_from = n_u
+    return {"u": u, "x": x, "origins": origins, "u_hat": u_hat,
+            "normals": np.column_stack([u_hat[:, 1], -u_hat[:, 0],
+                                        np.zeros(n_u)]),
+            "theta": theta, "fan_from": fan_from,
+            "x_bow_fan": float(origins[fan_from, 0]) if fan_from < n_u else None}
+
+
+def local_section(lines, origin, direction):
+    """平面-网格交线 -> 平面局部坐标 (r, z) 的线段组，形状 (n, 2, 2)。
+
+    `r` 是沿 `direction` 的坐标（非艏区就是 y ≤ 0 那一半），`z` 是高度。
+    """
+    if len(lines) == 0:
+        return np.zeros((0, 2, 2))
+    points = np.asarray(lines, dtype=np.float64).reshape(-1, 3)
+    r = (points - np.asarray(origin, dtype=np.float64)) @ np.asarray(direction)
+    return np.column_stack([r, points[:, 2]]).reshape(-1, 2, 2)
+
+
 def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATION_EPS):
     """单船的站位剖面网格（半船，含干舷与甲板）。
 
-    返回 dict：`points`（(n_u, n_row, 3)，坐标已除 Lpp，n_row = n_v + n_v2 - 1）、
-    `stations`（(n_u,) 站位掩码）、`valid`（(n_u, n_row) 格点掩码）、`x_range`
-    （半船曲面的物理 x 范围）、`n_v`/`n_v2`（水线行是第 n_v - 1 行）、
+    返回 dict：`points`（(n_u, n_row, 3)，全三维、格点的 x 在艏区不再固定，坐标已除
+    Lpp，n_row = n_v + n_v2 - 1）、`u`（(n_u,) 站位参数 0→艉、1→艏）、`theta`
+    （(n_u,) 站平面绕竖直枢轴的旋转角，非艏区为 0）、`stations`（(n_u,) 站位掩码）、
+    `valid`（(n_u, n_row) 格点掩码）、`x_range`（半船曲面的物理 x 范围）、`x_bow_fan`
+    （艏区起点 x，无艏区时 None）、`n_v`/`n_v2`（水线行是第 n_v - 1 行）、
     `n_waterline_stations`（剖面真的穿过设计水线的站位数）以及拼接、截断、丢弃的
     站位数等诊断计数。
 
@@ -636,21 +708,26 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
     3. 取各站位剖面与 v = 1 的弧长占比，按占比重采样成公共行网格。占比要单独算，
        是因为艏艉尖端的剖面可能整条落在水线以上或以下（frigate 艏柱、kvlcc2 球鼻
        艏），这些站位没有水线交点，用邻站的占比补上，v 映射才沿 u 连续。
+
+    站平面由 `station_frames` 给出：艏区（u ≥ `BOW_FAN_START`）是绕竖直枢轴旋转的
+    竖直平面族，其余是 `x = const` 的横切平面。两种情况的剖面都在平面局部坐标
+    (r, z) 里提取与重采样，再还原成三维点，因此 `_station_paths` / `_chains` /
+    `_select_paths` / `_resample` 与邻站连续性选链的行为完全一致。
     """
     points_, faces = half_ship_surface(stl_path, lpp)
     mesh = trimesh.Trimesh(points_, faces, process=False)
     x_lo, x_hi = float(points_[:, 0].min()), float(points_[:, 0].max())
-    span = x_hi - x_lo
-    stations = x_lo + (eps + np.linspace(0.0, 1.0, n_u) * (1.0 - 2.0 * eps)) * span
     n_row = n_v + n_v2 - 1
     min_arc = MIN_ARC_FRACTION * lpp
     tol = WELD_FRACTION * lpp
+    frames = station_frames(x_lo, x_hi, n_u, eps)
 
     sections = []
-    for station in stations:
-        lines = mesh_plane(mesh, (1.0, 0.0, 0.0), (station, 0.0, 0.0))
-        segments = (np.asarray(lines)[:, :, (1, 2)] if len(lines)
-                    else np.zeros((0, 2, 2)))
+    for index in range(n_u):
+        lines = mesh_plane(mesh, tuple(frames["normals"][index]),
+                           tuple(frames["origins"][index]))
+        segments = local_section(lines, frames["origins"][index],
+                                 frames["u_hat"][index])
         candidates, info = _station_paths(segments, tol, min_arc,
                                           MAX_JOIN_FRACTION * lpp,
                                           TOP_TOL_FRACTION * lpp, draft,
@@ -685,7 +762,7 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
 
     grid = np.zeros((n_u, n_row, 3), dtype=np.float64)
     valid = np.zeros(n_u, dtype=bool)
-    for index, station in enumerate(stations):
+    for index in range(n_u):
         if paths[index] is None:
             continue
         split = _split_by_fraction(paths[index], fractions[index])
@@ -700,14 +777,33 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
         inner = slice(1, len(profile) - 1)
         too_close = np.abs(profile[inner, 0]) < SEAM_OFFSET_FRACTION
         profile[inner, 0] = np.where(too_close, -SEAM_OFFSET_FRACTION, profile[inner, 0])
-        grid[index, :, 0] = station
-        grid[index, :, 1:] = profile
+        # 平面局部坐标 (r, z) -> 三维：origin + r·u_hat + z·e_z（origin 的 y、z 都是 0）
+        origin, direction = frames["origins"][index], frames["u_hat"][index]
+        grid[index, :, 0] = origin[0] + profile[:, 0] * direction[0]
+        grid[index, :, 1] = profile[:, 0] * direction[1]
+        grid[index, :, 2] = profile[:, 1]
         valid[index] = True
+
+    # 艏区平面族的所有剖面都过同一根竖直枢轴，龙骨行与甲板中线行确实是同一个点；
+    # 各站从三角化求交里拿到的坐标差几纳米级的噪声，这里直接对齐到艏区首站，
+    # 否则这些行会形成一圈近退化（或零面积）的细三角面
+    fan = np.flatnonzero(frames["theta"] > 0.0)
+    if len(fan) and valid[frames["fan_from"]]:
+        anchor = grid[frames["fan_from"], [0, -1]]
+        for index in fan:
+            if not valid[index]:
+                continue
+            for row, reference in zip((0, -1), anchor):
+                if np.linalg.norm(grid[index, row] - reference) <= PIVOT_SNAP_FRACTION * lpp:
+                    grid[index, row] = reference
 
     infos = [info for info, path in zip(counts, paths) if path is not None]
     return {"points": grid / lpp, "valid": np.repeat(valid[:, None], n_row, axis=1),
             "stations": valid, "x_range": (x_lo, x_hi), "n_v": n_v, "n_v2": n_v2,
-            "n_row": n_row,
+            "n_row": n_row, "u": frames["u"], "theta": frames["theta"],
+            "x": frames["x"], "x_bow_fan": frames["x_bow_fan"],
+            "n_bow_fan_stations": int(n_u - frames["fan_from"]),
+            "bow_fan_end_deg": BOW_FAN_END_DEG,
             "n_waterline_stations": int(len(known)),
             "n_spliced_stations": int(sum(i["n_chains"] - i["n_dropped"] > 1
                                           for i in infos)),
@@ -757,12 +853,34 @@ def _cap_rows(n_row):
     return quads, n_loop
 
 
+def _weld_points(points, faces, tol):
+    """把距离 ≤ tol 的顶点并成一个，并删掉退化/重复面与孤立顶点。
+
+    艏区平面族的所有剖面都过同一根竖直枢轴，因此龙骨行与甲板中线行在所有艏区站位
+    上是同一个点（浮点噪声量级）。这使相邻两站的那两条四边形退化成零面积三角形；
+    不并点的话 STL 回读（会自己 merge vertices）会撞上重复顶点，零面积面也留了下来。
+    """
+    count = len(points)
+    if count == 0:
+        return points, faces
+    pairs = cKDTree(points).query_pairs(tol, output_type="ndarray")
+    if len(pairs) == 0:
+        return points, faces
+    graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])),
+                       shape=(count, count))
+    n_node, label = connected_components(graph, directed=False)
+    first = np.full(n_node, count, dtype=np.int64)
+    np.minimum.at(first, label, np.arange(count))
+    return _compact(points[first], label[faces])
+
+
 def full_ship_mesh(grid):
     """规则站位网格 (n_u, n_row, 3) -> 水密全船三角网格，返回 (points, faces)。
 
     镜像 y → −y 时中线两行共用顶点（不重复造点），侧表面沿剖面环首尾相接，首尾
     两个站位的截面用 `_cap_rows` 的拉链条带封口，因此得到的网格主线（每条边恰好
-    两个面片）闭合。
+    两个面片）闭合。艏区剖面族的枢轴行会重合，最后由 `_weld_points` 并点并清掉
+    退化成零面积的三角形。
     """
     grid = np.asarray(grid, dtype=np.float64)
     n_u, n_row = grid.shape[0], grid.shape[1]
@@ -788,6 +906,7 @@ def full_ship_mesh(grid):
                 faces.append(np.array([[offset + order[0], offset + order[k],
                                         offset + order[k + 1]]]))
     faces = np.vstack(faces)
+    points, faces = _weld_points(points, faces, WELD_FRACTION * 1e-3 * _grid_scale(grid))
 
     # 绕向整体校验：水密网格的有向体积必须为正，否则把全部面片翻过来
     tri = points[faces]
@@ -798,44 +917,49 @@ def full_ship_mesh(grid):
     return points, faces
 
 
-def _profile_area(profile, draft):
-    """一条剖面折线（(m,2) 的 (y,z)）在 z ≤ draft 以下围成的面积（半船镜像后）。
+def _grid_scale(grid):
+    """网格的空间尺度（用于把比例容差变成几何容差）。"""
+    return float(np.abs(grid).max())
 
-    折线从龙骨走到甲板中线，水线以下的截面积分只要取 z ≤ draft 的那一段，端点用
-    线性插值补出准确的水线点。
+
+def mesh_displacement(points, faces, draft):
+    """封闭全船网格在 z ≤ draft 下的体积（平面裁剪 + 散度定理）。
+
+    艏区改成旋转平面族后，站位不再垂直于 x，「纵剖面面积 × dx」不再成立（截面是
+    斜的、且一行格点的 x 不固定）。这里回到体积的定义：把封闭网格用 z = draft 平面
+    裁开，对剩下的开口曲面做散度定理积分，原点取在裁剪平面上（`q = (0, 0, draft)`）
+    —— 平面的封闭盖的贡献恰好为 0，所以不需要三角化引擎就能得到准确的
+    水下体积。融合船与母船只用同一套网格（各自的站位重建）+ 同一个函数，可比性不变。
     """
-    z = profile[:, 1]
-    above = np.flatnonzero(z > draft)
-    if len(above) == 0:
-        cut = profile
-    else:
-        index = int(above[0])
-        if index == 0:
-            return 0.0
-        z0, z1 = z[index - 1], z[index]
-        ratio = (draft - z0) / (z1 - z0) if z1 > z0 else 0.0
-        crossing = profile[index - 1] + ratio * (profile[index] - profile[index - 1])
-        cut = np.vstack([profile[:index], crossing])
-    y = np.r_[cut[:, 0], -cut[:, 0][::-1]]
-    zz = np.r_[cut[:, 1], cut[:, 1][::-1]]
-    return float(0.5 * np.abs(
-        (y * np.roll(zz, -1) - np.roll(y, -1) * zz).sum()))
+    if len(faces) == 0:
+        return None
+    mesh = trimesh.Trimesh(np.asarray(points, dtype=np.float64),
+                           np.asarray(faces, dtype=np.int64), process=False)
+    cut = trimesh.intersections.slice_mesh_plane(
+        mesh, (0.0, 0.0, -1.0), (0.0, 0.0, float(draft)), cap=False)
+    vertices = np.asarray(cut.vertices, dtype=np.float64)
+    triangles = np.asarray(cut.faces, dtype=np.int64)
+    if len(triangles) == 0:
+        return 0.0
+    q = np.array([0.0, 0.0, float(draft)])
+    a = vertices[triangles[:, 0]] - q
+    b = vertices[triangles[:, 1]] - q
+    c = vertices[triangles[:, 2]] - q
+    return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
 
 
 def grid_displacement(grid, draft):
-    """按站位横剖面面积积分求水线以下的排水体积（站位积分法）。
+    """站位网格 -> 全船封闭网格 -> 水线以下体积（z ≤ draft）。
 
-    `grid` 是 (n_u, n_row, 3) 的物理尺度网格，只含连续有效站位；每个站位的截面面积
-    取 z ≤ draft 的部分（含镜像），对 x 做梯形积分。
+    `grid` 是 (n_u, n_row, 3) 的物理尺度网格，只含连续有效站位。时刻注意：艏区的
+    格点不在 x = const 的平面上，所以不再能按 `面积 × dx` 积分，改由
+    `full_ship_mesh` 的封闭网格做平面裁剪求体积（见 `mesh_displacement`）。
     """
     grid = np.asarray(grid, dtype=np.float64)
     if grid.shape[0] < 2:
         return None
-    areas = np.array([_profile_area(station, draft) for station in grid[:, :, 1:]])
-    x = grid[:, :, 0]
-    if not np.allclose(x, x[:, :1]):
-        raise ValueError("站位网格的 x 不是逐行常数")
-    return float(np.trapezoid(areas, x[:, 0]))
+    points, faces = full_ship_mesh(grid)
+    return mesh_displacement(points, faces, draft)
 
 
 def morph_hulls(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weight,
@@ -875,8 +999,9 @@ def morph_hulls(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weight,
     draft_interp = ((1.0 - weight) * float(draft_a) / float(lpp_a)
                     + weight * float(draft_b) / float(lpp_b)) * lpp_new
 
-    # 排水体积：融合船与两母船用同一套站位网格积分，保证可比
-    displacement = grid_displacement(grid, draft_new)
+    # 排水体积：融合船与两母船用同一套站位网格（各自的站位重建）+ 同一个函数
+    # （封闭网格在 z ≤ T 下的裁剪体积），保证可比
+    displacement = mesh_displacement(points, faces, draft_new)
     mother_displacement = []
     for surface, lpp, draft in zip(surfaces, (lpp_a, lpp_b), (draft_a, draft_b)):
         mask = surface["stations"]
@@ -932,6 +1057,11 @@ def morph_hulls(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weight,
         "n_clipped_loops_b": surfaces[1]["n_clipped_loops"],
         "n_detached_stations_a": surfaces[0]["n_detached_stations"],
         "n_detached_stations_b": surfaces[1]["n_detached_stations"],
+        "n_bow_fan_stations": surfaces[0]["n_bow_fan_stations"],
+        "bow_fan_start": BOW_FAN_START,
+        "bow_fan_end_deg": BOW_FAN_END_DEG,
+        "x_bow_fan_a": surfaces[0]["x_bow_fan"],
+        "x_bow_fan_b": surfaces[1]["x_bow_fan"],
         "n_points": int(len(points)),
         "watertight": bool(mesh.is_watertight),
         "winding_consistent": bool(mesh.is_winding_consistent),
@@ -944,12 +1074,12 @@ def morph_hulls(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weight,
         "displacement_interp_phys_m3": interp_phys,
         "displacement_rel_diff_phys": None if not interp_phys else
         float((displacement - interp_phys) / interp_phys),
-        "displacement_method": "station_section_integration_z_le_T",
+        "displacement_method": "closed_mesh_volume_z_le_T",
         "parameterization": "station_section_arc_length_two_segment_v",
         "symmetry": "full_ship_mirrored_y",
     }
     return {"points": points, "faces": faces, "grid": grid,
-            "stations": grid[:, 0, 0], "meta": meta}
+            "u": surfaces[0]["u"][station_ok], "meta": meta}
 
 
 def weight_tag(weight):
