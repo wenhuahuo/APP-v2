@@ -55,6 +55,9 @@ GROOVE_SAMPLES = (0.02, 0.06, 0.095, 0.115, 0.128, 0.14, 0.152)
 # dtc 母船数据（dataset/ 不入 git，缺席时 skip）
 DTC_STL = ROOT / "dataset" / "classic_hulls" / "dtc.stl"
 DTC_LPP, DTC_T = 5.976, 0.244
+# 细艏母船（上一轮 3° 楔形截断丢掉的全长最多：2.23% L）
+WIGLEY_STL = ROOT / "dataset" / "classic_hulls" / "wigley.stl"
+WIGLEY_LPP, WIGLEY_T = 3.0, 0.1875
 
 
 def analytic_half_breadth(x, z, hull):
@@ -403,6 +406,32 @@ class HullMorphTest(unittest.TestCase):
             self.assertLess(abs(rebuilt - expected) / span, 2e-2,
                             msg=f"z = {height}: 重建 x_max {rebuilt:.4f} vs 解析 "
                                 f"{expected:.4f}（凹槽变成竖直墙）")
+
+    def test_reference_length_matches_parent(self):
+        """w = 0 重建船的全长与艏柱最前点都与母船 STL 一致（< 0.3% L，数据缺席时 skip）。
+
+        艏区末站的平面转到中心面（`BOW_FAN_END_DEG = 0`）后，末站剖面就是母船自己的
+        艏柱轮廓，`x_max` 是真艏柱；全长只剩 `STATION_EPS`（0.2%）的艉端内缩。上一轮
+        末站停在 90° − 3°，`|y| < tan 3°·(x − x_b)` 的艏尖楔形不在曲面里，全长比母船
+        短 0.35%（dtc）–2.23%（wigley）。
+        """
+        cases = (("dtc", DTC_STL, DTC_LPP, DTC_T), ("wigley", WIGLEY_STL, WIGLEY_LPP,
+                                                    WIGLEY_T))
+        for name, path, lpp, draft in cases:
+            if not path.exists():
+                continue
+            surface = hull_station_grid(path, lpp, draft, n_u=N_U, n_v=N_V, n_v2=N_V2)
+            points, faces = full_ship_mesh(surface["points"][surface["stations"]] * lpp)
+            mother = np.asarray(trimesh.load(str(path), force="mesh").vertices)
+            span = float(np.ptp(mother[:, 0]))
+            rebuilt = float(np.ptp(points[:, 0]))
+            self.assertLess(abs(rebuilt - span) / span, 3e-3,
+                            msg=f"{name} 全长 {rebuilt:.4f} vs 母船 {span:.4f}")
+            # 艏柱最前点：不能只是总长对上（艉端内缩与前伸会互相抵消）
+            self.assertLess(abs(points[:, 0].max() - mother[:, 0].max()) / span, 3e-3,
+                            msg=f"{name} 艏柱最前点 {points[:, 0].max():.4f} vs "
+                                f"{mother[:, 0].max():.4f}")
+            self.assertTrue(trimesh.Trimesh(points, faces, process=False).is_watertight)
 
     def test_dtc_back_substitution_in_the_bow(self):
         """dtc 母船在艏区的 w = 0 回代偏差 < 0.5% L（数据缺席时 skip）。

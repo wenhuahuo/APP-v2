@@ -84,12 +84,22 @@ MIRROR = np.array([1.0, -1.0, 1.0])
 # 其余站位仍是 x = const 的横切平面。取 0.9 是因为球鼻艏与干舷外飘的凹槽落在艏部
 # 10% 船长里（dtc 的剖面从 x/L ≈ 0.98 起被切成两条链）
 BOW_FAN_START = 0.9
-# 艏区末站平面与中心面的夹角（度）。不能取 0：那时平面就是对称面，剖面整条落在
-# y = 0 上，镜像后与自身重合、出现零面积面；3° 时末站在艏尖处离中线约 3 cm
-BOW_FAN_END_DEG = 3.0
-# 艏区各站的龙骨行/甲板中线行对齐到艏区首站的容差（相对 Lpp）：这些行本来就是同一
-# 个点（都过竖直枢轴），差异只来自求交的浮点噪声
-PIVOT_SNAP_FRACTION = 1e-4
+# 艏区末站平面与中心面的夹角（度）。0 表示一直转到中心面：末站的平面就是 y = 0，
+# 剖面即艏柱轮廓（见 `stem_profile`），x_max 是真实艏柱、L_ref 与母船一致。
+# 上一轮取 3°，末站平面停在与中心面成 3° 的位置、并用平封口盖上，把
+# `|y| < tan 3°·(x − x_b)` 的艏尖楔形切掉了：L_ref 比母船短 0.15%（dtc）–2.23%
+# （wigley），艏柱线 x_max(z) 在艏尖亏欠 0.5%–8.2% L，排水量偏小 0.08%–0.72%。
+# 往小调角度不是出路：1° 时 series60 的末站剖面窄到 6 mm，`_weld_points` 把甲板
+# 中线并点后出现一条被 4 个面片共用的边（不水密）。所以末站不再平封口，改由
+# 「倒数第二站 → 艏柱轮廓」的 loft 收成三角楔；实测 11 个母船全部水密、
+# 单连通、L_ref 相对母船包围盒 −0.02%…+0.02%。
+BOW_FAN_END_DEG = 0.0
+# 艏柱轮廓的横切层数：末站的平面恰好是 y = 0，而尖艏的曲面在那条平面上与平面
+# 相切（半宽在艏柱处趋于 0），`mesh_plane` 切不出交线。改成按 z = const 横切
+# 母船曲面、每层取最靠前的 x——按对称性那个点就落在中心面上，也就是艏柱。
+# 层心取在两端锚点之间（避开与母船底板/甲板平面重合的退化层），层间线性插值，
+# 艏柱轮廓在艏区内光滑，插值误差是二阶的，20 层已远小于网格行距的离散误差。
+STEM_LEVELS = 20
 
 
 def _compact(points, tris):
@@ -146,10 +156,23 @@ def _slice(points, faces, normal, origin, lpp):
 
 
 def half_ship_surface(stl_path, lpp):
-    """STL → 半船曲面网格（y ≤ 0，含干舷与甲板），面为 (M,3) 三角面。"""
+    """STL → 半船曲面网格（y ≤ 0，含干舷与甲板），面为 (M,3) 三角面。
+
+    切在**模型自己的中心面**上：偏移取顶点到中心面的最小距离，正常船型（龙骨与甲板
+    中线有落在 y = 0 上的顶点）该值就是 0，与直接切 y = 0 完全一样。series60 的 STL
+    是两块壳拼的、中线留了一道 0.42 mm 的缝，按 y = 0 切什么也切不掉——半船曲面其实
+    是整条闭合壳，两块船壳都在里面，艏区平面族里每张近中心面的平面都会切到那道缝的
+    内壁（θ = 89.5° 时缝壁在离枢轴 0.18 m 处），选出那条假链后艏部出现 V 形缺口
+    （艏区折返带 16.7% L）。切在缝壁上、再把切面平移回 y = 0，半船曲面就是干净的
+    单侧壳，水平位移量等于缝的半宽（series60 0.21 mm，占半宽的 0.04%）。
+    """
     mesh = _load(stl_path)
-    return _slice(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, np.int64),
-                  (0.0, -1.0, 0.0), (0.0, 0.0, 0.0), lpp)
+    points = np.asarray(mesh.vertices, dtype=np.float64)
+    offset = float(np.abs(points[:, 1]).min())
+    cut = _slice(points, np.asarray(mesh.faces, np.int64),
+                 (0.0, -1.0, 0.0), (0.0, -offset, 0.0), lpp)
+    cut[0][:, 1] += offset
+    return cut
 
 
 def half_wet_surface(stl_path, lpp, draft):
@@ -509,6 +532,20 @@ def _profile_distance(first, second, weight=ENDPOINT_WEIGHT):
                  / (count + weight))
 
 
+def _bridge_cost(candidate, arc):
+    """拼接缺口带来的偏离曲面代价（与 `_profile_distance` 同量纲的均方长度）。
+
+    带缺口的候选在缺口处是两点直连，那一小段（约占弧长 gap/arc）离真实曲面
+    gap/2 远。不罚它的话，行距只差百分之几的缺口候选会被选中：workboat 的
+    θ = 85.6° 站有个 0.25 m 的缺口候选，行距比无缺口的小 4%，选中后艏部回代偏差
+    从 0.06% 涨到 0.90% L。小的缺口（拼接噪声量级）罚项可以忽略，不影响原来的选链。
+    """
+    gap = float(candidate["max_gap"])
+    if gap <= 0.0 or arc <= 0.0:
+        return 0.0
+    return 0.25 * gap * gap * min(gap / arc, 1.0)
+
+
 def _select_paths(sections, draft, n_v, n_v2):
     """按邻站连续性给每个站位选一条候选路径。
 
@@ -558,7 +595,8 @@ def _select_paths(sections, draft, n_v, n_v2):
             if not candidates:
                 continue
             pick = min(range(len(candidates)),
-                       key=lambda k: (_profile_distance(summary(candidates[k]), reference),
+                       key=lambda k: (_profile_distance(summary(candidates[k]), reference)
+                                      + _bridge_cost(candidates[k], arc(candidates[k])),
                                       -arc(candidates[k]), k))
             chosen[index] = pick
             reference = summary(candidates[pick])
@@ -637,6 +675,22 @@ def _resample(path, n):
                             np.interp(v, s, path[unique, 1])])
 
 
+def _resample_knot(path, n, apex=None):
+    """按弧长把剖面折线重采样成 n 个点；`apex`（顶点下标）给定时它必定是一行。
+
+    弧长均分的行距在剖面折线的**尖角**处会把尖角削掉最多半行：艏柱轮廓的最前点
+    （艏柱尖）就是这样一个尖角，而它就是 `L_ref` 的来源。给 `apex` 时把折线在
+    该顶点处切成两段、各自等分，（近似）保持原来的行距。
+    """
+    step = np.linalg.norm(np.diff(path, axis=0), axis=1)
+    s = np.r_[0.0, np.cumsum(step)]
+    if apex is None or not 0 < apex < len(path) - 1 or s[-1] <= 0.0:
+        return _resample(path, n)
+    keep = int(np.clip(round(s[apex] / s[-1] * (n - 1)), 1, n - 2))
+    return np.vstack([_resample(path[:apex + 1], keep + 1),
+                      _resample(path[apex:], n - keep)[1:]])
+
+
 def station_frames(x_lo, x_hi, n_u, eps=STATION_EPS):
     """每站的剖面平面：`origin` + 平面内水平方向 `u_hat`（含 `e_z`）+ 旋转角 `theta`。
 
@@ -667,10 +721,16 @@ def station_frames(x_lo, x_hi, n_u, eps=STATION_EPS):
         u_hat[fan_from:, 1] = np.cos(theta[fan_from:])
     elif fan_from < n_u:  # 只剩一站：无法形成平面族，留在横切平面上
         fan_from = n_u
+    # cos(π/2) 是 6.1e-17 而不是 0：末站一旦转到中心面，就把这个残量清零，那一站
+    # 整站落在 y = 0 上（`on_midline` 靠这一行成立）
+    u_hat[np.abs(u_hat) < 1e-15] = 0.0
+    on_midline = u_hat[:, 1] == 0.0
+    midline = int(np.flatnonzero(on_midline)[0]) if on_midline.any() else None
     return {"u": u, "x": x, "origins": origins, "u_hat": u_hat,
             "normals": np.column_stack([u_hat[:, 1], -u_hat[:, 0],
                                         np.zeros(n_u)]),
-            "theta": theta, "fan_from": fan_from,
+            "theta": theta, "fan_from": fan_from, "midline_station": midline,
+            "on_midline": on_midline,
             "x_bow_fan": float(origins[fan_from, 0]) if fan_from < n_u else None}
 
 
@@ -684,6 +744,62 @@ def local_section(lines, origin, direction):
     points = np.asarray(lines, dtype=np.float64).reshape(-1, 3)
     r = (points - np.asarray(origin, dtype=np.float64)) @ np.asarray(direction)
     return np.column_stack([r, points[:, 2]]).reshape(-1, 2, 2)
+
+
+def stem_profile(bow_mesh, x_b, lower, upper, levels=STEM_LEVELS):
+    """母船艏区网格 -> 艏区末站的剖面（中心面 y = 0 上的艏柱轮廓）。
+
+    末站的平面就是 y = 0，剖面是中心面剖线：从龙骨锚点沿艏部底面（龙骨线）向前到
+    前踵，再沿艏柱上行到艏尖，最后沿甲板中线回到甲板锚点。`lower` / `upper` 是艏区
+    首站剖面的两端（龙骨点与甲板中线点的局部坐标 (r, z)）——它们就是竖直枢轴与曲面
+    的两个交点，所有艏区剖面都过这两点。
+
+    这条线不能用 `mesh_plane` 切 `y = 0` 得到：尖艏的半宽在艏柱处趋于 0，曲面与那张
+    平面相切，切不出交线。两条支各用自己合适的横切方向：
+
+    * **艏柱**用 z = const 横切，每层取最靠前的 x——按对称性那个点落在中心面上；
+    * **龙骨线**用 x = const 横切，每层取最低的 z。z 层在平板底板与甲板平面上切片
+      退化，反过来 x 层在艏柱尖端退化，所以不能只用一种方向。
+
+    返回局部坐标 (m, 2) 的折线，r = x_b − x ≤ 0（θ = 90° 时 u_hat = (−1, 0, 0)，
+    点 = (x_b − r, 0, z)）。
+    """
+    vertices = np.asarray(bow_mesh.vertices, dtype=np.float64)
+    # 最前点：x 最大，x 相同的取 z 最高（竖直艏柱的整条艏柱线都是最前点，取顶端那个）
+    index = int(np.lexsort((-vertices[:, 2], -vertices[:, 0]))[0])
+    apex_x, apex_z = float(vertices[index, 0]), float(vertices[index, 2])
+    z_lo, z_hi = float(lower[1]), float(upper[1])
+    # 层心铺在「龙骨锚点 → 上界」之间，上界取甲板锚点与母船最前点高度的较大者：
+    # 艏柱后倾、最高点即最前点的船型（frigate、workboat）甲板中线那一段因此是一段
+    # 回落的直线。底层不取（与母船底板平面重合，切片退化），顶层取（艏柱上端就在
+    # 那里，不取等于把艏柱顶削掉：wigley 的竖直艏柱丢 4.6% L）；最前点单独插进去，
+    # 它就是 L_ref 的来源
+    z_top = max(z_hi, apex_z)
+    heights = np.unique(np.r_[np.linspace(z_lo, z_top, levels + 2)[1:], apex_z])
+    stem = []
+    for height in heights:
+        if height == apex_z:  # 艏柱尖那一层与甲板/底板相切，切片退化，直接用顶点
+            stem.append([x_b - apex_x, apex_z])
+            continue
+        lines = mesh_plane(bow_mesh, (0.0, 0.0, 1.0), (0.0, 0.0, float(height)))
+        if len(lines) == 0:
+            continue
+        forward = float(np.asarray(lines, dtype=np.float64)[:, :, 0].max())
+        stem.append([x_b - forward, float(height)])
+
+    # 龙骨线：从枢轴 x_b 到前踵（最低那层艏柱点的 x），逐层取该 x 处最低的 z
+    forefoot = x_b - stem[0][0] if stem else x_b
+    keel = []
+    for x in np.linspace(x_b, forefoot, levels + 2)[1:-1]:
+        lines = mesh_plane(bow_mesh, (1.0, 0.0, 0.0), (float(x), 0.0, 0.0))
+        if len(lines) == 0:
+            continue
+        keel.append([x_b - float(x),
+                     float(np.asarray(lines, dtype=np.float64)[:, :, 2].min())])
+
+    ends = np.array([lower, upper], dtype=np.float64)
+    middle = np.array(keel + stem, dtype=np.float64).reshape(-1, 2)
+    return np.vstack([ends[:1], middle, ends[1:]])
 
 
 def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATION_EPS):
@@ -713,6 +829,10 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
     竖直平面族，其余是 `x = const` 的横切平面。两种情况的剖面都在平面局部坐标
     (r, z) 里提取与重采样，再还原成三维点，因此 `_station_paths` / `_chains` /
     `_select_paths` / `_resample` 与邻站连续性选链的行为完全一致。
+
+    平面族末站的平面是中心面 `y = 0`（`BOW_FAN_END_DEG = 0`），它的剖面不是切片
+    得到的而是 `stem_profile` 单独构的艏柱轮廓（见那里的说明）；那一站整站落在
+    `y = 0` 上，镜像时与中线行共用顶点，所以不做 `SEAM_OFFSET_FRACTION` 的推开。
     """
     points_, faces = half_ship_surface(stl_path, lpp)
     mesh = trimesh.Trimesh(points_, faces, process=False)
@@ -721,9 +841,24 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
     min_arc = MIN_ARC_FRACTION * lpp
     tol = WELD_FRACTION * lpp
     frames = station_frames(x_lo, x_hi, n_u, eps)
+    midline = frames["midline_station"]
+    on_midline = frames["on_midline"]
+    # 艏柱轮廓要按 z 逐层横切的只是艏区那一小块网格：整条船的三角面里 x ≥ x_b 的
+    # 只占几个百分点，先筛出来再切，`STEM_LEVELS` 层切片才不至于拖慢单船网格
+    bows = None
+    if midline is not None:
+        forward = points_[faces][:, :, 0].max(axis=1)
+        bows = trimesh.Trimesh(points_, faces[forward >= frames["x_bow_fan"]],
+                               process=False)
 
     sections = []
     for index in range(n_u):
+        if index == midline:
+            # 末站平面与中心面重合，切片退化，由下面的 `stem_profile` 单独给剖面
+            sections.append({"candidates": [],
+                             "info": {"n_chains": 1, "n_dropped": 0,
+                                      "n_clipped": 0, "n_detached": 0}})
+            continue
         lines = mesh_plane(mesh, tuple(frames["normals"][index]),
                            tuple(frames["origins"][index]))
         segments = local_section(lines, frames["origins"][index],
@@ -754,6 +889,15 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
         if fraction is not None:
             fractions[index] = fraction
 
+    # 末站的艏柱轮廓：两端锚点取艏区首站剖面的两端（所有艏区剖面都过那两点）
+    if midline is not None:
+        anchor = paths[frames["fan_from"]]
+        if anchor is not None:
+            paths[midline] = stem_profile(bows, frames["x_bow_fan"], anchor[0], anchor[-1])
+            fraction = _waterline_fraction(paths[midline], draft)
+            if fraction is not None:
+                fractions[midline] = fraction
+
     known = np.flatnonzero(~np.isnan(fractions))
     if len(known) == 0:
         raise ValueError(f"{stl_path} 的剖面都不穿过设计水线 z = {draft}")
@@ -772,11 +916,21 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
         if (np.linalg.norm(np.diff(first, axis=0), axis=1).sum() < min_arc
                 or np.linalg.norm(np.diff(second, axis=0), axis=1).sum() < min_arc):
             continue
-        profile = np.vstack([_resample(first, n_v), _resample(second, n_v2)[1:]])
-        # 内部行（龙骨行与甲板中线行除外）贴在中线上的推开一点，避免镜像重合
-        inner = slice(1, len(profile) - 1)
-        too_close = np.abs(profile[inner, 0]) < SEAM_OFFSET_FRACTION
-        profile[inner, 0] = np.where(too_close, -SEAM_OFFSET_FRACTION, profile[inner, 0])
+        # 末站（艏柱轮廓）的最前点必须在行上，否则弧长均分的行距会把艏尖削掉
+        # 最多半行（实测 kcs 0.17%、npl_round_bilge 0.28% L_ref）
+        apex = int(np.argmin(paths[index][:, 0])) if index == midline else None
+        cut = len(first) - 1
+        profile = np.vstack([
+            _resample_knot(first, n_v, apex if apex is not None and apex < cut else None),
+            _resample_knot(second, n_v2,
+                           None if apex is None or apex < cut else apex - cut + 1)[1:]])
+        # 内部行（龙骨行与甲板中线行除外）贴在中线上的推开一点，避免镜像重合。
+        # 中心面那一站（末站）整站就在 y = 0 上，镜像时本来就与中线行共用顶点，
+        # 推开反而会在艏尖造出一薄壁
+        if not on_midline[index]:
+            inner = slice(1, len(profile) - 1)
+            too_close = np.abs(profile[inner, 0]) < SEAM_OFFSET_FRACTION
+            profile[inner, 0] = np.where(too_close, -SEAM_OFFSET_FRACTION, profile[inner, 0])
         # 平面局部坐标 (r, z) -> 三维：origin + r·u_hat + z·e_z（origin 的 y、z 都是 0）
         origin, direction = frames["origins"][index], frames["u_hat"][index]
         grid[index, :, 0] = origin[0] + profile[:, 0] * direction[0]
@@ -784,18 +938,15 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
         grid[index, :, 2] = profile[:, 1]
         valid[index] = True
 
-    # 艏区平面族的所有剖面都过同一根竖直枢轴，龙骨行与甲板中线行确实是同一个点；
-    # 各站从三角化求交里拿到的坐标差几纳米级的噪声，这里直接对齐到艏区首站，
-    # 否则这些行会形成一圈近退化（或零面积）的细三角面
+    # 艏区平面族的所有剖面都过同一根竖直枢轴，所以每站的龙骨行与甲板中线行按构造
+    # 就是枢轴与曲面的那两个交点——它们必须**无条件**对齐到艏区首站（θ = 0，就是
+    # x = x_b 的横切剖面）的那两行。求交的浮点噪声是纳米级，但起链点稍稍偏开枢轴
+    # （series60 的 θ = 89.5° 站偏 1.4 mm）会让这一行的折线出现一个小尖刺，镜像后
+    # 那个顶点上出现被 4 个面片共用的边（不水密）
     fan = np.flatnonzero(frames["theta"] > 0.0)
     if len(fan) and valid[frames["fan_from"]]:
-        anchor = grid[frames["fan_from"], [0, -1]]
-        for index in fan:
-            if not valid[index]:
-                continue
-            for row, reference in zip((0, -1), anchor):
-                if np.linalg.norm(grid[index, row] - reference) <= PIVOT_SNAP_FRACTION * lpp:
-                    grid[index, row] = reference
+        for row, reference in zip((0, -1), grid[frames["fan_from"], [0, -1]]):
+            grid[fan, row] = reference
 
     infos = [info for info, path in zip(counts, paths) if path is not None]
     return {"points": grid / lpp, "valid": np.repeat(valid[:, None], n_row, axis=1),
@@ -803,6 +954,7 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
             "n_row": n_row, "u": frames["u"], "theta": frames["theta"],
             "x": frames["x"], "x_bow_fan": frames["x_bow_fan"],
             "n_bow_fan_stations": int(n_u - frames["fan_from"]),
+            "n_stem_stations": int(midline is not None),
             "bow_fan_end_deg": BOW_FAN_END_DEG,
             "n_waterline_stations": int(len(known)),
             "n_spliced_stations": int(sum(i["n_chains"] - i["n_dropped"] > 1
