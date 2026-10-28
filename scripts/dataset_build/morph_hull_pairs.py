@@ -11,11 +11,12 @@ w = 0.25 / 0.50 / 0.75 三个权重（w = 0 / 1 就是母船本身，不生成�
 
 幂等与增量：
 
-* 已存在的 STL **不覆盖**。已有的 7 个产物（kcs_s175 三个权重、kvlcc2_wigley 三个、
-  dtc_frigate w050）是已有 CFD 算例与数据集条目的溯源文件，默认还要回读它并现场
-  重算同一权重做对照（顶点数、面数、包围盒），不一致就报错停下，绝不覆盖。
+* 默认**不覆盖**已存在的 STL：先回读它并现场重算同一权重做对照（顶点数、面数、
+  包围盒），一致就跳过、不一致就报错停下。
 * 缺的权重按对补齐（例如 dtc_frigate 只需补 w025 / w075），`morph_meta.json` 里
   已有权重的条目原样保留。
+* `--overwrite` 用于几何代码改动后重建全部产物：**先打印将被覆盖的文件清单**，
+  再逐个重写（不做重算对照，因为几何本来就要变）。
 
 用法（在仓库根目录）:
 
@@ -101,6 +102,8 @@ def main():
     parser.add_argument("--output", default=str(ROOT / "dataset" / "morphed_hulls"))
     parser.add_argument("--no-verify-existing", dest="verify_existing",
                         action="store_false", help="跳过已有 STL 的重算对照（默认做）")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="覆盖已存在的 STL（先打印清单；用于几何代码改动后重建）")
     parser.add_argument("--dry-run", action="store_true", help="只打印计划，不写任何文件")
     args = parser.parse_args()
 
@@ -128,10 +131,14 @@ def main():
         todo, keep = [], []
         for weight in args.weights:
             stl_name = f"{pair}_w{weight_tag(weight)}.stl"
-            if (out_dir / stl_name).exists():
-                if stl_name not in cases:
-                    raise SystemExit(f"{out_dir / stl_name} 已存在，但 morph_meta.json 里没有"
+            path = out_dir / stl_name
+            if path.exists():
+                if stl_name not in cases and not args.overwrite:
+                    raise SystemExit(f"{path} 已存在，但 morph_meta.json 里没有"
                                      f"条目（{meta_path}），先人工确认再跑")
+                if args.overwrite:
+                    todo.append(weight)      # 覆盖：清单在下面打印
+                    continue
                 keep.append(weight)
             else:
                 todo.append(weight)
@@ -143,6 +150,15 @@ def main():
 
     print(f"已存在 {n_existing} 个（不覆盖{'，先做重算对照' if args.verify_existing and n_existing else ''}），"
           f"待生成 {n_new} 个")
+    if args.overwrite:
+        replaced = [plan["out_dir"] / f"{plan['pair']}_w{weight_tag(w)}.stl"
+                    for plan in plans for w in plan["todo"]
+                    if (plan["out_dir"] / f"{plan['pair']}_w{weight_tag(w)}.stl").exists()]
+        print(f"\n--overwrite：将覆盖 {len(replaced)} 个已有文件（清单）：")
+        for path in replaced:
+            print(f"  {path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}")
+        if not replaced:
+            print("  （无）")
     if args.dry_run:
         for plan in plans:
             if not plan["todo"]:
@@ -151,7 +167,7 @@ def main():
         print("（dry-run：未写入任何文件）")
         return 0
 
-    if args.verify_existing:
+    if args.verify_existing and not args.overwrite:
         for plan in plans:
             if not plan["keep"]:
                 continue

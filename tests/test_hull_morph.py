@@ -94,6 +94,19 @@ def analytic_volume(hull):
     return 4.0 / 9.0 * hull["B"] * hull["Lpp"] * hull["T"]
 
 
+def fold_amplitude(grid, lpp, low=0.12, high=0.88):
+    """相邻三站位同一行的二阶差分（折返带的量度），返回船中段的最大值 / 折减长度。
+
+    同一行格点沿 u 应该连续：`|P[i+1] − 2P[i] + P[i−1]|` 只反映曲率（量级 O(Δu²)）。
+    剖面被三角化切成多条链、选链逐站翻转时，这一项会跳到若干个 % L_ref。端部 12%
+    是艉封板/艏柱，剖面下端本来就要抬离龙骨线，不计入。
+    """
+    second = np.linalg.norm(grid[2:] - 2.0 * grid[1:-1] + grid[:-2], axis=2)
+    u = (grid[:, 0, 0] - grid[0, 0, 0]) / (grid[-1, 0, 0] - grid[0, 0, 0])
+    body = (u[1:-1] > low) & (u[1:-1] < high)
+    return float(second[body].max() / lpp)
+
+
 class HullMorphTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -191,6 +204,20 @@ class HullMorphTest(unittest.TestCase):
         self.assertTrue(np.all(np.diff(draft) > 0), draft)
         self.assertTrue(np.all(np.diff(half_breadth) > 0), half_breadth)
 
+    def test_rows_are_continuous_between_stations(self):
+        """相邻站位同一行格点的二阶差分 < 1% L_ref。
+
+        这是「选链逐站翻转」的回归防线：母船剖面在粗三角化平底上会被切成「中线碎链 +
+        主剖面」两段，碎片链若被接到路径尾部、或起链位置被平板节点的 z 浮点噪声决定，
+        同一行格点就会在相邻站位之间来回跳（HEAD 代码算 dtc×s175 的折返带是 63%
+        L_ref）。现在选链按邻站连续性决定，这一项回到曲率量级。
+        """
+        for weight, result in self.morphed.items():
+            lpp = result["meta"]["L_ref_m"]
+            amplitude = fold_amplitude(result["grid"], lpp)
+            self.assertLess(amplitude, 1e-2,
+                            msg=f"w={weight} 折返幅度 {amplitude:.3e} L_ref")
+
     def test_displacement_is_monotone_and_matches_analytic(self):
         """排水体积（z ≤ T_new 站位积分）随 w 单调，且与解析体积对账。"""
         volumes = [self.morphed[w]["meta"]["displacement_m3"] for w in WEIGHTS]
@@ -230,6 +257,12 @@ class HullMorphTest(unittest.TestCase):
         residual = points[:, :, 1] - analytic_half_breadth(
             points[:, :, 0], points[:, :, 2], HULL_A)
         self.assertLess(np.abs(residual[side]).max() / HULL_A["B"], 2e-2)
+        # 洞的两侧边缘必须是「直线跨过」而不是折返：除洞所在的那一段 x，其余站位的
+        # 同行二阶差分仍在 1% L_ref 以内
+        second = np.linalg.norm(points[2:] - 2.0 * points[1:-1] + points[:-2], axis=2)
+        x = points[:, 0, 0] / HULL_A["Lpp"]
+        outside = (x[1:-1] < 0.35) | (x[1:-1] > 0.65)
+        self.assertLess(second[outside].max() / HULL_A["Lpp"], 1e-2)
 
 
 if __name__ == "__main__":

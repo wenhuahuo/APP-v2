@@ -188,96 +188,381 @@ def _chains(nodes, start, end):
     return chains
 
 
-def _splice(chains, min_piece, max_join):
-    """把若干条链拼成一条路径：丢碎段，其余接到路径**尾端**。
+# 站位剖面拼接的候选枚举上限：链数超过它就退回贪心拼接（避免状态爆炸）
+DP_MAX_CHAINS = 7
+# 每个站位保留的候选路径数上限
+MAX_CANDIDATES = 256
+# 起点判定的 z 带宽（相对 Lpp）：低于「最低点 + 带宽」的节点都算船底，取其中 |y| 最小的
+# 作起点。平底船的底板节点 z 是 1e-11~1e-5 量级的噪声/薄片，严格比大小会让起链在
+# 「中线碎链」与「主剖面链」之间逐站翻转
+START_BAND_FRACTION = 1e-3
+# 起点必须落在「实质链」上：弧长不足该站位链总弧长 1% 的碎链不能当起点（否则艉部
+# 断面上几十微米的碎链会因为 z 更低而劫持起点，整条路径只剩那一小簇点）
+START_MIN_PIECE = 1e-2
+# 候选路径的弧长下限（相对该站位最长候选）：更短的候选是碎片的退化路径
+MIN_CANDIDATE_RATIO = 2e-2
+# 端点在跨站连续性距离里的权重（相当于多少行的权重）：端点是「甲板中线」锚点，
+# 只按行平均时它只占 1/79，路径沿中线缝回走、末端停在龙骨附近这种错位会被稀释
+ENDPOINT_WEIGHT = 10.0
 
-    起点取「最低 z（同 z 取 |y| 最小）」端点所在的链，从它出发只往尾部生长：每次
-    在剩余链的端点里挑离当前路径尾端最近的一个接上去（链可以整体反向）。只往尾部
-    长是关键——底板分段给出的那截「中线碎链」会落到文件末尾，随后被顶端截断丢掉，
-    若允许往首端接（旧实现的做法）就会把它接到龙骨前面，整条剖面被挤到一端。
 
-    碎段是三角化噪声（实测弧长占比 ≤ 1% 的碎段都在 y ≈ 0、z ≈ 0 的底板细片上），
-    丢弃并计数；端距超过 `max_join` 的链不拼，计入 `detached`，不静默丢环。
+def _chain_end(chains, index, side):
+    """链 `index` 的端点：side = 0 取首点，1 取末点。"""
+    return chains[index][0] if side == 0 else chains[index][-1]
+
+
+def _oriented(chains, index, entry):
+    """按「从端点 entry 进入」的方向取链。"""
+    return chains[index] if entry == 0 else chains[index][::-1]
+
+
+def _start_of(chains, band, pool=None):
+    """起链：船底带（最低 z 加 `band`）里 |y| 最小的端点所在链，确定性 tie-break。
+
+    起点必须贴在中线上（龙骨线 / 平底的中线端），但不是「z 严格最小」——底板节点
+    的 z 是浮点噪声或薄片厚度，严格比大小会逐站翻转起链。先取最低 z，再把
+    「最低 z + band」以内的节点都当船底，在其中取 |y| 最小的端点。
     """
-    length = np.array([np.linalg.norm(np.diff(c, axis=0), axis=1).sum() for c in chains])
-    total = length.sum()
-    keep = length >= min_piece * total
-    dropped = int((~keep).sum())
-    chains = [chains[i] for i in np.flatnonzero(keep)]
-    if not chains:
-        return None, dropped, 0
+    allowed = set(range(len(chains))) if pool is None else set(pool)
+    ends = [(index, side) for index in range(len(chains)) for side in (0, 1)
+            if index in allowed]
+    floor = min(_chain_end(chains, *item)[1] for item in ends)
+    band_ends = [item for item in ends if _chain_end(chains, *item)[1] <= floor + band]
+    return min(band_ends, key=lambda item: (abs(_chain_end(chains, *item)[0]),
+                                            item[0], item[1]))
 
-    first = min(range(len(chains)), key=lambda i: (chains[i][0, 1], abs(chains[i][0, 0])))
-    path = chains[first]
-    remaining = [i for i in range(len(chains)) if i != first]
-    detached = 0
+
+def _substantial_chains(chains):
+    """弧长占比 ≥ `START_MIN_PIECE` 的链下标；全都太短时退回全部链。"""
+    lengths = np.array([np.linalg.norm(np.diff(c, axis=0), axis=1).sum() for c in chains])
+    total = float(lengths.sum())
+    if total <= 0.0:
+        return list(range(len(chains)))
+    keep = [index for index in range(len(chains))
+            if lengths[index] >= START_MIN_PIECE * total]
+    return keep or list(range(len(chains)))
+
+
+def _greedy_chains(chains, tol, max_join, band):
+    """贪心拼接（链数超过 `DP_MAX_CHAINS` 时的退路）：每次接离尾端最近的链。"""
+    start_index, start_side = _start_of(chains, band, _substantial_chains(chains))
+    path = _oriented(chains, start_index, start_side)
+    used, max_gap = (start_index,), 0.0
+    remaining = [index for index in range(len(chains)) if index != start_index]
     while remaining:
         best = None
-        for i in remaining:
-            for reverse in (False, True):
-                tip = chains[i][-1] if reverse else chains[i][0]
-                distance = np.linalg.norm(tip - path[-1])
+        for index in remaining:
+            for entry in (0, 1):
+                distance = float(np.linalg.norm(_chain_end(chains, index, entry) - path[-1]))
                 if best is None or distance < best[0]:
-                    best = (distance, i, reverse)
-        distance, i, reverse = best
+                    best = (distance, index, entry)
+        distance, index, entry = best
         if distance > max_join:
-            detached = len(remaining)
             break
-        piece = chains[i][::-1] if reverse else chains[i]
-        path = np.vstack([path, piece])
-        remaining.remove(i)
-    return path, dropped, detached
+        path = np.vstack([path, _oriented(chains, index, entry)])
+        used += (index,)
+        max_gap = max(max_gap, distance)
+        remaining.remove(index)
+    return [{"points": path, "used": used, "max_gap": max_gap, "total_gap": max_gap}]
 
 
-def _section_path(segments, tol, min_arc, max_join, top_tol):
-    """站位剖面交线 -> 从龙骨端到甲板中线的有序路径。
+def _assemble_chains(chains, tol, max_join, band):
+    """链集合 -> 候选拼接路径（起点固定为「最低 (z, |y|) 端」，只向尾端生长）。
 
-    终止点有两个候选规则，优先用「中线」那一条：
+    起点取所有链端点里**量化后的 z 最小、再 |y| 最小**的那个。z 必须量化：平底船的
+    底板节点 z 都是 ~1e-11 量级的不同噪声值，直接比大小会让起链在「中线小碎链」与
+    「主剖面链」之间逐站翻转，路径随之在「正常 / 底板走两遍 / 上部被截断」之间跳变，
+    融合船的同一行格点于是跨站不连续（dtc 的折返带就是这么来的）。
 
-    * 半船曲面在 y = 0 上有边界（龙骨线、艏柱、甲板中线），路径的终点必然落在这条
-      边界上。取**中线节点里 z 最高的那个**作终点：正常船型就是甲板中线；舷墙/
-      舷弧比甲板高的船型（frigate、kvlcc2）也不会因为最高点落在舷边而把甲板切掉。
-    * 剖面上没有中线节点（整个环落在 y < 0 的附体）时退回「最后一个最高点」。
+    之后在「已用链集合 × 当前所在链 × 当前端点」上做 DP，状态里保留拼接缺口
+    （先比最大缺口、再比总缺口）最小的那条路径。枚举子集是必需的：分段平底给出的
+    重叠碎链有时应当整条丢掉，而不是硬接上去。
 
-    返回 (路径 (m,2) 的 (y,z), 信息 dict)；剖面为空时返回 (None, 信息)。
+    返回按 (最大缺口, 总缺口, 用链数, 用链顺序) 升序的候选列表，每个是 dict：
+    `points`（(m,2) 的 (y, z)）、`used`（用到的链下标）、`max_gap`、`total_gap`。
+    顺序只由输入决定，不含浮点噪声驱动的分支，因此可复现。
+    """
+    if not chains:
+        return []
+    tol = max(float(tol), np.finfo(float).tiny)
+    gap_limit = max_join
+    if len(chains) > DP_MAX_CHAINS:
+        return _greedy_chains(chains, tol, gap_limit, band)
+
+    start_index, start_side = _start_of(chains, band, _substantial_chains(chains))
+    states = {1 << start_index: {
+        (start_index, 1 - start_side): {
+            "max_gap": 0.0, "total_gap": 0.0,
+            "points": _oriented(chains, start_index, start_side),
+            "used": (start_index,)}}}
+
+    count = len(chains)
+    for size in range(1, count):
+        for mask in [m for m in states if bin(m).count("1") == size]:
+            for (last, end_bit), item in list(states[mask].items()):
+                tip = item["points"][-1]
+                for index in range(count):
+                    if mask >> index & 1:
+                        continue
+                    for entry in (0, 1):
+                        gap = float(np.linalg.norm(_chain_end(chains, index, entry) - tip))
+                        if gap > gap_limit:
+                            continue
+                        max_gap = max(item["max_gap"], gap)
+                        total_gap = item["total_gap"] + gap
+                        key = (mask | 1 << index, index, 1 - entry)
+                        slot = states.setdefault(key[0], {})
+                        old = slot.get(key[1:])
+                        if old is not None and (
+                                (old["max_gap"], old["total_gap"]) <= (max_gap, total_gap)):
+                            continue
+                        slot[key[1:]] = {
+                            "max_gap": max_gap, "total_gap": total_gap,
+                            "points": np.vstack([item["points"],
+                                                 _oriented(chains, index, entry)]),
+                            "used": item["used"] + (index,)}
+
+    candidates = [item for slot in states.values() for item in slot.values()]
+    candidates.sort(key=lambda item: (item["max_gap"], item["total_gap"],
+                                      len(item["used"]), item["used"]))
+    return candidates[:MAX_CANDIDATES]
+
+
+def _truncate_path(path, mode, tol, top_tol):
+    """按终止规则截断路径。
+
+    * `seam`：截到「中线节点里 z 最高的那个」——正常船型就是甲板中线；舷墙/舷弧比
+      甲板高的船型（frigate、kvlcc2）也不会因为最高点落在舷边而把甲板切掉。
+    * `top`：截到最后一个最高点（剖面上没有中线节点时）。
+    * `deck`：先按 `seam` 截断，若末端不在中线上，再用一条水平直线补到中线（甲板面
+      缺失时用，和 kvlcc2「剖面止于舷边、由镜像条带补薄甲板」是同一套处理）。
+    * `as_is`：不截断。
+    """
+    if mode == "deck":
+        base = _truncate_path(path, "seam", tol, top_tol)
+        if base.shape[0] >= 2 and abs(base[-1, 0]) > tol and base[-1, 1] > base[0, 1]:
+            return np.vstack([base, np.array([[0.0, base[-1, 1]]])])
+        return base
+    if mode == "as_is":
+        return path
+    if mode == "seam":
+        seam = np.flatnonzero(np.abs(path[:, 0]) <= tol)
+        seam = seam[seam > 0]
+        if len(seam) > 0:
+            stop = int(seam[np.argmax(path[seam, 1])])
+            return path[:stop + 1]
+        mode = "top"
+    stop = int(np.flatnonzero(path[:, 1] >= path[:, 1].max() - top_tol)[-1])
+    return path[:stop + 1]
+
+
+def _strip_seam(path, tol):
+    """去掉路径内部贴在中线上（|y| ≤ tol）的点，首尾保留。
+
+    半船剖面只应在**两端**碰到中线（龙骨点与甲板中线）。中段还出现一整段 y ≈ 0 的
+    竖壁，是两半船体拼接留下的缝（series60 的 0.4 mm 缝），或者某几个站位独有的
+    退化碎面；它会把弧长吃掉一大截，让同一行格点在相邻站位之间跳变。这里把这种
+    内部竖壁从路径里摘掉（几何上等价于「从龙骨直接连到离开中线的那一点」），是否
+    采用交给跨站连续性判断：真正的中心线呆木（skeg）在邻站同样存在，会一致地选回
+    带竖壁的那条。
+    """
+    if path.shape[0] < 3:
+        return path
+    interior = np.abs(path[1:-1, 0]) <= tol
+    if not interior.any():
+        return path
+    keep = np.r_[True, ~interior, True]
+    return path[keep]
+
+
+def _straddles(points, draft):
+    """折线或线段组是否跨越 z = draft。
+
+    输入是 (m,2) 的剖面路径或 (n,2,2) 的交线段组，取第 1 列（z）判断相邻点是否
+    落在 draft 两侧。
+    """
+    z = np.asarray(points, dtype=np.float64)[..., 1]
+    return bool(np.any(np.diff(z >= draft, axis=-1) != 0))
+
+
+def _station_paths(segments, tol, min_arc, max_join, top_tol, draft=None, band=None):
+    """一个站位的切片交线 -> 候选路径列表（确定性顺序）+ 链数诊断。
+
+    `draft` 给定时做**水线过滤**：切片本身穿过 z = draft 时，只保留真的含有该交点
+    的候选 —— 禁止把水线所在的段落截断掉，v = 1 必须来自剖面与 z = draft 的真实
+    交点。
+
+    每个候选是 dict：`points`、`mode`（终止规则）、`used`、`max_gap`、`total_gap`、
+    `n_dropped`、`n_detached`、`n_clipped`。剖面为空时返回 ([], 诊断)。
     """
     info = {"n_chains": 0, "n_dropped": 0, "n_clipped": 0, "n_detached": 0}
     if len(segments) == 0:
-        return None, info
+        return [], info
     seg = np.asarray(segments, dtype=np.float64).reshape(-1, 2, 2)
     # 丢掉退化交线（细长碎片面与平面近乎相切）
     seg = seg[np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1) > tol]
     if len(seg) == 0:
-        return None, info
+        return [], info
 
     nodes, label = _weld(seg.reshape(-1, 2), tol)
     start, end = label[0::2], label[1::2]
     ok = start != end
     start, end = start[ok], end[ok]
     if len(start) == 0:
-        return None, info
+        return [], info
 
     chains = _chains(nodes, start, end)
     info["n_chains"] = len(chains)
-    path, info["n_dropped"], info["n_detached"] = _splice(
-        chains, MIN_PIECE_FRACTION, max_join)
-    if path is None or path.shape[0] < 2:
+    if not chains:
+        return [], info
+
+    if band is None:
+        band = START_BAND_FRACTION * tol / WELD_FRACTION
+    section_crosses = draft is not None and _straddles(seg, draft)
+    candidates, seen = [], set()
+    threshold = min_arc
+    for item in _assemble_chains(chains, tol, max_join, band):
+        for mode in ("seam", "deck", "top", "as_is"):
+            path = _truncate_path(item["points"], mode, tol, top_tol)
+            if path.shape[0] < 2:
+                continue
+            if np.linalg.norm(np.diff(path, axis=0), axis=1).sum() < min_arc:
+                continue
+            if section_crosses and not _straddles(path, draft):
+                continue
+            missing = [index for index in range(len(chains)) if index not in item["used"]]
+            detached = 0
+            for index in missing:
+                near = min(float(np.linalg.norm(_chain_end(chains, index, side) - endpoint))
+                           for side in (0, 1) for endpoint in (path[0], path[-1]))
+                detached += int(near > max_join)
+            variants = [(mode, path)]
+            stripped = _strip_seam(path, band)
+            if stripped.shape[0] != path.shape[0]:
+                variants.append((mode + "+seamstrip", stripped))
+            for variant_mode, variant_path in variants:
+                key = variant_path.tobytes()
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append({
+                    "points": variant_path, "mode": variant_mode, "used": item["used"],
+                    "max_gap": item["max_gap"], "total_gap": item["total_gap"],
+                    "n_dropped": len(missing), "n_detached": detached,
+                    "n_clipped": int(variant_path.shape[0] < item["points"].shape[0])})
+    if candidates:
+        best = max(np.linalg.norm(np.diff(c["points"], axis=0), axis=1).sum()
+                   for c in candidates)
+        threshold = max(min_arc, MIN_CANDIDATE_RATIO * best)
+        candidates = [c for c in candidates
+                      if np.linalg.norm(np.diff(c["points"], axis=0), axis=1).sum()
+                      >= threshold]
+    return candidates, info
+
+
+def _path_rows(path, draft, n_v, n_v2):
+    """剖面路径 -> 与站位网格同一口径的行点（(n_v + n_v2 - 1, 2)）。
+
+    行号就是两段弧长（龙骨 → 水线 → 甲板中线）的等分位，也就是「同一行格点」的
+    定义。剖面整条落在水线一侧（艏艉尖端）时退回单段弧长均分。
+    """
+    n_row = n_v + n_v2 - 1
+    fraction = _waterline_fraction(path, draft)
+    split = None if fraction is None else _split_by_fraction(path, fraction)
+    if split is None:
+        return _resample(path, n_row)
+    first, second = split
+    return np.vstack([_resample(first, n_v), _resample(second, n_v2)[1:]])
+
+
+def _profile_distance(first, second, weight=ENDPOINT_WEIGHT):
+    """两份剖面摘要（行点 + 端点）的加权 L2 距离。
+
+    用**行口径**而不是等弧长口径比较：折返带的判据本来就是「同一行相邻站位的位移」，
+    而甲板、舷侧这些短弧长段落按等弧长比较会被稀释（一条 5% 弧长的甲板错位在 201 个
+    等弧长采样点里只占十几点），按行比较则每行等权。端点再按 `weight` 行的权重加进去。
+    """
+    rows = np.sum((first["rows"] - second["rows"]) ** 2, axis=1)
+    count = len(rows)
+    return float((rows.sum() + weight * np.sum((first["end"] - second["end"]) ** 2))
+                 / (count + weight))
+
+
+def _select_paths(sections, draft, n_v, n_v2):
+    """按邻站连续性给每个站位选一条候选路径。
+
+    种子取「单链（没有拼接歧义）且弧长最长」的站位（正常船型是船中），再向两端逐站
+    推进：每站从候选里选与已定邻站**行点**距离最小的一条（同距离时取弧长更长者、
+    再取候选序号，保证确定性）。同一行的格点因此沿 u 连续，不会在「正常 / 底板走
+    两遍 / 上部被截断」之间跳变。
+    """
+    n = len(sections)
+
+    def arc(candidate):
+        return float(np.linalg.norm(np.diff(candidate["points"], axis=0), axis=1).sum())
+
+    def summary(candidate):
+        if "summary" not in candidate:
+            candidate["summary"] = {
+                "rows": _path_rows(candidate["points"], draft, n_v, n_v2),
+                "end": candidate["points"][-1]}
+        return candidate["summary"]
+
+    chosen = [None] * n
+    # 种子只从「切片只有一条链」的站位里选：多链站的候选里必有一条超长的（底板走两遍
+    # 之类），用它当参照会把整段剖面带偏
+    pool = [index for index, item in enumerate(sections)
+            if item["candidates"] and item["info"]["n_chains"] == 1]
+    if not pool:
+        pool = [index for index, item in enumerate(sections) if item["candidates"]]
+        if not pool:
+            return chosen
+        fewest = min(sections[index]["info"]["n_chains"] for index in pool)
+        pool = [index for index in pool if sections[index]["info"]["n_chains"] == fewest]
+
+    seed = max(pool, key=lambda index: (max(arc(c) for c in sections[index]["candidates"]),
+                                        -index))
+    # 种子的候选优先取「终止在中线（甲板中线）」的那类：剖面闭合环在某些船型上会多走
+    # 一段中线缝回来，弧长更长，若按最长来挑种子，整套网格都会以「末端停在龙骨附近」
+    # 为参照，端部行号随之跳变
+    candidates = sections[seed]["candidates"]
+    canonical = [k for k, item in enumerate(candidates) if item["mode"] in ("seam", "deck")]
+    best = max(canonical or range(len(candidates)),
+               key=lambda k: (arc(candidates[k]), -k))
+    chosen[seed] = best
+    for step in (1, -1):
+        reference = summary(sections[seed]["candidates"][best])
+        for index in range(seed + step, n if step > 0 else -1, step):
+            candidates = sections[index]["candidates"]
+            if not candidates:
+                continue
+            pick = min(range(len(candidates)),
+                       key=lambda k: (_profile_distance(summary(candidates[k]), reference),
+                                      -arc(candidates[k]), k))
+            chosen[index] = pick
+            reference = summary(candidates[pick])
+    return chosen
+
+
+def _section_path(segments, tol, min_arc, max_join, top_tol, band=None):
+    """站位剖面交线 -> 从龙骨端到甲板中线的有序路径（单站简化入口）。
+
+    不做跨站连续性选择（那要用整条船的站位序列，见 `hull_station_grid`）：取 DP 里
+    「用到的链最多、最大缺口最小」的那条，并优先 `seam` 终止规则。给
+    `check_hull_stl.py` 的单站检查与诊断用。
+
+    返回 (路径 (m,2) 的 (y,z), 信息 dict)；剖面为空时返回 (None, 信息)。
+    """
+    candidates, info = _station_paths(segments, tol, min_arc, max_join, top_tol,
+                                      band=band)
+    if not candidates:
         return None, info
-    # 终点：中线节点里 z 最高的那个（起点是龙骨，不参与候选）
-    seam = np.flatnonzero(np.abs(path[:, 0]) <= tol)
-    seam = seam[seam > 0]
-    if len(seam) > 0:
-        stop = int(seam[np.argmax(path[seam, 1])])
-    else:
-        stop = int(np.flatnonzero(path[:, 1] >= path[:, 1].max() - top_tol)[-1])
-    if stop < path.shape[0] - 1:
-        path = path[:stop + 1]
-        info["n_clipped"] = 1
-        if path.shape[0] < 2:
-            return None, info
-    if np.linalg.norm(np.diff(path, axis=0), axis=1).sum() < min_arc:
-        return None, info
-    return path, info
+    chosen = max(candidates, key=lambda item: (len(item["used"]), item["mode"] == "seam",
+                                               -item["max_gap"], -item["total_gap"]))
+    info["n_dropped"] = chosen["n_dropped"]
+    info["n_detached"] = chosen["n_detached"]
+    info["n_clipped"] = chosen["n_clipped"]
+    return chosen["points"], info
 
 
 def _waterline_fraction(path, draft):
@@ -321,6 +606,8 @@ def _resample(path, n):
     """按累积弧长把剖面折线重采样成 n 个 (y, z)，段内弧长归一化即该段的 v。"""
     step = np.linalg.norm(np.diff(path, axis=0), axis=1)
     s = np.r_[0.0, np.cumsum(step)]
+    if s[-1] <= 0.0:
+        return np.tile(np.asarray(path, dtype=np.float64)[0], (n, 1))
     # 弧长单调不减：重复值（零长段）会让 np.interp 的 xp 非严格递增
     unique = np.r_[True, np.diff(s) > 0]
     s = s[unique] / s[-1]
@@ -335,12 +622,20 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
     返回 dict：`points`（(n_u, n_row, 3)，坐标已除 Lpp，n_row = n_v + n_v2 - 1）、
     `stations`（(n_u,) 站位掩码）、`valid`（(n_u, n_row) 格点掩码）、`x_range`
     （半船曲面的物理 x 范围）、`n_v`/`n_v2`（水线行是第 n_v - 1 行）、
-    `n_waterline_stations`（剖面真的穿过设计水线的站位数）以及多环拼接、截断、
-    丢弃的站位数等诊断计数。
+    `n_waterline_stations`（剖面真的穿过设计水线的站位数）以及拼接、截断、丢弃的
+    站位数等诊断计数。
 
-    两遍扫描：第一遍取各站位剖面与 v = 1 的弧长占比，第二遍按占比重采样。占比要
-    单独算，是因为艏艉尖端的剖面可能整条落在水线以上或以下（frigate 艏柱、kvlcc2
-    球鼻艏），这些站位没有水线交点，用邻站的占比补上，v 映射才沿 u 连续。
+    三遍：
+
+    1. 逐站求交线、拆链，并**枚举候选路径**（不同的选链组合 × 三种终止规则，见
+       `_station_paths`）。穿过水线的切片只保留真的含该交点的候选，水线段不会被截掉。
+    2. **按邻站连续性选路径**（`_select_paths`）：从船中那条单链站位出发向两端推进，
+       每站取与已定邻站路径 L2 距离最小的候选。剖面可能被三角化切成多条链、碎链
+       有时该丢，逐站独立决策会让同一行格点跨站跳变（折返带）；用邻站做参照后，
+       同一行的格点沿 u 连续。
+    3. 取各站位剖面与 v = 1 的弧长占比，按占比重采样成公共行网格。占比要单独算，
+       是因为艏艉尖端的剖面可能整条落在水线以上或以下（frigate 艏柱、kvlcc2 球鼻
+       艏），这些站位没有水线交点，用邻站的占比补上，v 映射才沿 u 连续。
     """
     points_, faces = half_ship_surface(stl_path, lpp)
     mesh = trimesh.Trimesh(points_, faces, process=False)
@@ -349,16 +644,32 @@ def hull_station_grid(stl_path, lpp, draft, n_u=160, n_v=60, n_v2=20, eps=STATIO
     stations = x_lo + (eps + np.linspace(0.0, 1.0, n_u) * (1.0 - 2.0 * eps)) * span
     n_row = n_v + n_v2 - 1
     min_arc = MIN_ARC_FRACTION * lpp
+    tol = WELD_FRACTION * lpp
+
+    sections = []
+    for station in stations:
+        lines = mesh_plane(mesh, (1.0, 0.0, 0.0), (station, 0.0, 0.0))
+        segments = (np.asarray(lines)[:, :, (1, 2)] if len(lines)
+                    else np.zeros((0, 2, 2)))
+        candidates, info = _station_paths(segments, tol, min_arc,
+                                          MAX_JOIN_FRACTION * lpp,
+                                          TOP_TOL_FRACTION * lpp, draft,
+                                          START_BAND_FRACTION * lpp)
+        sections.append({"candidates": candidates, "info": info})
+
+    choice = _select_paths(sections, draft, n_v, n_v2)
 
     paths, fractions, counts = [None] * n_u, np.full(n_u, np.nan), []
-    for index, station in enumerate(stations):
-        lines = mesh_plane(mesh, (1.0, 0.0, 0.0), (station, 0.0, 0.0))
-        path, info = _section_path(lines[:, :, (1, 2)], WELD_FRACTION * lpp,
-                                   min_arc, MAX_JOIN_FRACTION * lpp,
-                                   TOP_TOL_FRACTION * lpp)
-        counts.append(info)
-        if path is None:
+    for index, section in enumerate(sections):
+        candidates, info = section["candidates"], dict(section["info"])
+        if choice[index] is None:
+            counts.append(info)
             continue
+        candidate = candidates[choice[index]]
+        info.update({key: candidate[key]
+                     for key in ("n_dropped", "n_detached", "n_clipped")})
+        counts.append(info)
+        path = candidate["points"]
         if np.linalg.norm(np.diff(path, axis=0), axis=1).sum() < min_arc:
             continue
         paths[index] = path
