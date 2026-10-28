@@ -27,9 +27,16 @@ OpenFOAM 的 snappyHexMesh 需要完整封闭船体，所以融合船的输出�
 v 取站位剖面的弧长，而不是全局测地距离（旧实现的 `half_hull_uv`）：测地距离在
 粗三角化的平底船（kvlcc2 的底板）上会混入沿龙骨方向的假距离，实测让 kvlcc2 ×
 wigley 的融合体积只有插值值的 54%；弧长只依赖单条剖面折线，对三角化粗细不敏感。
+
+写文件的入口是 `write_pair`：一对船型的若干权重 → 每个权重一个 STL，外加同目录
+一份按 STL 文件名索引的 `morph_meta.json`。两个命令行入口
+（`scripts/dataset_build/morph_hulls.py` 单对、`morph_hull_pairs.py` 批量）都只
+调它，元信息 schema 只有这一处定义。
 """
 
 import gzip
+import json
+from pathlib import Path
 
 import numpy as np
 import trimesh
@@ -632,3 +639,79 @@ def morph_hulls(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weight,
     }
     return {"points": points, "faces": faces, "grid": grid,
             "stations": grid[:, 0, 0], "meta": meta}
+
+
+def weight_tag(weight):
+    """权重写成三位整数，例 0.25 -> "025"，STL 文件名里带它。"""
+    return f"{round(weight * 100):03d}"
+
+
+def _number(value, spec=".4f"):
+    """元信息里的量可能是 None（母船有效站位不足时排水量算不出来），打印时给 n/a。"""
+    return "n/a" if value is None else format(value, spec)
+
+
+def write_pair(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weights, out_dir,
+               pair=None, hull_a=None, hull_b=None, n_u=160, n_v=60, n_v2=20,
+               previous=None, log=print):
+    """融合一对船型的若干权重，写 STL 与 `morph_meta.json`，返回汇总 dict。
+
+    `out_dir` 是该对船的目录（`dataset/morphed_hulls/<a>_<b>/`）：每个权重一个
+    `<pair>_w<三位权重>.stl`，元信息按 STL 文件名索引在同一份 `morph_meta.json` 里。
+    `hull_a` / `hull_b` 是船型名（默认取 STL 文件名），`pair` 是目录名（默认
+    `<hull_a>_<hull_b>`）。
+
+    `previous` 是该对船已有的 `morph_meta.json` 内容，用于增量补权重：里面已有的
+    权重条目**原样保留**（它们是已有算例与数据集条目的溯源信息），只覆盖本次真的
+    重算的权重。回读 STL 后不水密直接抛错，不留半成品。
+    """
+    hull_a = str(hull_a if hull_a is not None else Path(stl_a).stem)
+    hull_b = str(hull_b if hull_b is not None else Path(stl_b).stem)
+    pair = str(pair if pair is not None else f"{hull_a}_{hull_b}")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    cases = dict(previous.get("cases", {})) if previous else {}
+    for weight in weights:
+        result = morph_hulls(stl_a, stl_b, lpp_a, lpp_b, draft_a, draft_b, weight,
+                             n_u=n_u, n_v=n_v, n_v2=n_v2)
+        meta = result["meta"]
+        stl_name = f"{pair}_w{weight_tag(weight)}.stl"
+        path = out_dir / stl_name
+        trimesh.Trimesh(result["points"], result["faces"], process=False).export(path)
+        # 回读校验：STL 没有顶点共享信息，必须让 trimesh 合并顶点后再判水密
+        reloaded = trimesh.load(str(path), force="mesh")
+        if not reloaded.is_watertight:
+            raise RuntimeError(f"{path} 回读后不水密，检查站位网格与封口")
+        meta["stl"] = stl_name
+        meta["stl_watertight_on_reload"] = bool(reloaded.is_watertight)
+        cases[stl_name] = meta
+        relative = meta["displacement_rel_diff_norm"]
+        log(f"{stl_name}: {meta['n_points']} 点 {meta['n_triangles']} 面  "
+            f"L_ref={_number(meta['L_ref_m'])} T={_number(meta['T_m'])} "
+            f"B/2={_number(meta['half_beam_m'])} D={_number(meta['depth_m'])} "
+            f"排水量={_number(meta['displacement_m3'])} "
+            f"(归一化插值 {_number(meta['displacement_interp_norm_m3'])}, "
+            f"{_number(None if relative is None else relative * 100, '+.2f')}%) "
+            f"水密={meta['watertight']}")
+
+    done = list(weights)
+    summary = {
+        "hull_a": hull_a,
+        "hull_b": hull_b,
+        "stl_a": str(stl_a),
+        "stl_b": str(stl_b),
+        "Lpp_a": lpp_a,
+        "Lpp_b": lpp_b,
+        "T_a": draft_a,
+        "T_b": draft_b,
+        "n_u": n_u,
+        "n_v": n_v,
+        "n_v2": n_v2,
+        "weights": sorted(set(previous.get("weights", [])) | set(done)) if previous else done,
+        "cases": cases,
+    }
+    (out_dir / "morph_meta.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
+    log(f"写出 {out_dir}")
+    return summary
