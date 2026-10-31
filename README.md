@@ -14,14 +14,12 @@ OpenFOAM 静水航行算例，按 DrivAerNet++ 的思路整理；字段定义与
 # 1. 集群端：foamToVTK 导出算例末态单元场与 hull patch
 ssh <cluster> 'bash export_case_vtk.sh ~/Documents/OpenFoamWorks/APPSolver-v2-Dataset/kcs_normal_mesh_25s ~/dataset_export'
 
-# 2. 本地：同步导出包到 dataset/.build_cache/
-bash scripts/data_raw_export/sync_case.sh kcs_normal_mesh_25s
+# 2. 集群端：导出包留在 ~/dataset_export/，就地组装成条目（不回传笔记本）
+PYTHON=/path/to/cluster-home/.conda/envs/mesh/bin/python3 \
+  bash scripts/dataset_build/build_dataset.sh kcs_normal_mesh_25s kcs_sparse_mesh_25s
 
-# 3. 组装数据集条目并刷新 dataset/shipbench/index.json
-bash scripts/dataset_build/build_dataset.sh kcs_normal_mesh_25s kcs_sparse_mesh_25s
-
-# 4. 校验条目
-python3 src/dataset/validate_entry.py
+# 3. 校验条目（build_dataset.sh 已逐条校验，这里整批复核）
+/path/to/cluster-home/.conda/envs/mesh/bin/python3 src/dataset/validate_entry.py
 
 # 5. 拟合归一化统计量（只含训练集条目，写 dataset/shipbench/stats.json）
 python3 scripts/datapipe/build_stats.py --entries kcs_fr026_normal_mesh
