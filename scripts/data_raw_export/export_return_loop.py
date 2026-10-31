@@ -305,21 +305,32 @@ def main() -> None:
             print(f"\n== {stamp} {case.name}（stage={entry['stage']}）", flush=True)
 
             if entry["stage"] is None:
-                ok, note = export_case(export_script, case, export_root,
-                                       args.openfoam_bashrc, args.dry_run)
-                sizes, problem = verify_package(pkg) if ok else ({}, note)
-                if not ok or problem and "缺失或过小" in problem:
+                # 之前手工导出的包（老流程）直接采用，不重新跑一遍 foamToVTK
+                adopted = verify_package(pkg)[0] if pkg.is_dir() else {}
+                if adopted and all(adopted[name] >= floor for name, floor in MIN_BYTES.items()):
+                    ok, note, sizes, problem = (True, "已有导出包，直接采用",
+                                                package_sizes(pkg), "")
+                else:
+                    ok, note = export_case(export_script, case, export_root,
+                                           args.openfoam_bashrc, args.dry_run)
+                    if args.dry_run:
+                        print("   [dry-run] 跳过导出校验、回传与清理", flush=True)
+                        done += 1
+                        continue
+                    sizes, problem = verify_package(pkg) if ok else ({}, note)
+                sizes = sizes or package_sizes(pkg)
+                if not ok or (problem and "缺失或过小" in problem):
                     print(f"   导出失败：{note or problem}", flush=True)
                     entry["attempts"] += 1
                     ledger(ledger_path, {"time": stamp, "site": args.site, "case": case.name,
                                          "stage": "export-failed", "note": (note or problem)[:200]})
                     save_state(state_path, state)
                     continue
-                sizes = sizes or package_sizes(pkg)
                 entry.update({"stage": "exported", "sizes": sizes,
-                              "exported_at": stamp})
+                              "exported_at": stamp, "export_note": note})
                 save_state(state_path, state)
-                print(f"   导出完成 internal.vtu={sizes['internal.vtu'] / 1e6:.1f} MB "
+                print(f"   导出完成{'（' + note + '）' if note else ''} "
+                      f"internal.vtu={sizes['internal.vtu'] / 1e6:.1f} MB "
                       f"hull.vtp={sizes['hull.vtp'] / 1e6:.2f} MB "
                       f"stl={sizes['stl'] / 1e6:.1f} MB{('  ' + problem) if problem else ''}",
                       flush=True)
@@ -333,6 +344,10 @@ def main() -> None:
             if entry["stage"] == "exported" and args.return_to:
                 ok, note = return_package(pkg, args.return_to, args.remote_export_root,
                                           args.dry_run)
+                if args.dry_run:
+                    print("   [dry-run] 不写状态、不清理", flush=True)
+                    done += 1
+                    continue
                 if not ok:
                     print(f"   回传失败：{note}", flush=True)
                     ledger(ledger_path, {"time": stamp, "site": args.site, "case": case.name,
@@ -359,12 +374,21 @@ def main() -> None:
                 freed_pkg, removed_pkg = prune_package_vtk(pkg, args.dry_run)
                 freed += freed_pkg
                 removed += removed_pkg
+                if args.dry_run:
+                    print(f"   [dry-run] 可释放 {freed / 1e9:.2f} GB："
+                          f"{len(removed)} 项（不删不做记录）", flush=True)
+                    done += 1
+                    continue
                 entry.update({"stage": "pruned", "pruned_at": time.strftime("%F %T"),
                               "freed_bytes": freed})
                 save_state(state_path, state)
                 print(f"   清理完成，释放 {freed / 1e9:.2f} GB："
                       f"{', '.join(removed) if removed else '无'}", flush=True)
                 ledger(ledger_path, {"time": stamp, "site": args.site, "case": case.name,
+                                     "internal_vtu": entry["sizes"]["internal.vtu"],
+                                     "hull_vtp": entry["sizes"]["hull.vtp"],
+                                     "manifest": entry["sizes"]["case_manifest.json"],
+                                     "stl": entry["sizes"]["stl"],
                                      "returned_bytes": sum(entry["sizes"].values()),
                                      "freed_bytes": freed, "stage": "pruned",
                                      "note": "; ".join(removed)})

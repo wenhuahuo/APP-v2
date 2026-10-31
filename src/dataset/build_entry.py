@@ -213,7 +213,13 @@ def build_entry(bundle, dataset_root, box=FLOW_BOX):
 def update_index(dataset_root, meta):
     path = Path(dataset_root) / "index.json"
     index = json.loads(path.read_text()) if path.exists() else {"entries": {}}
-    index["entries"][meta["entry_id"]] = {
+    index["entries"][meta["entry_id"]] = index_row(meta)
+    index["n_entries"] = len(index["entries"])
+    path.write_text(json.dumps(index, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def index_row(meta):
+    return {
         "source_case": meta["source_case"],
         "hull": meta["hull"],
         "mesh_level": meta["mesh_level"],
@@ -224,15 +230,42 @@ def update_index(dataset_root, meta):
         "n_hull_points": meta["mesh"]["n_hull_wetted_points"],
         "files": meta["files"],
     }
-    index["n_entries"] = len(index["entries"])
-    path.write_text(json.dumps(index, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def reindex(dataset_root):
+    """按各条目目录里的 meta.json 重建 index.json。
+
+    条目可能是另一台机器组装好后同步过来的，此时没有 meta 返回值可用来增量更新；
+    用这个模式从磁盘重建，避免两份 index.json 合并出错。
+    """
+    dataset_root = Path(dataset_root)
+    entries = {}
+    for path in sorted(dataset_root.iterdir()):
+        meta_path = path / "meta.json"
+        if not path.is_dir() or not meta_path.is_file():
+            continue
+        meta = json.loads(meta_path.read_text())
+        entries[meta["entry_id"]] = index_row(meta)
+    index = {"entries": entries, "n_entries": len(entries)}
+    (dataset_root / "index.json").write_text(
+        json.dumps(index, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    return index
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bundle", required=True, help="集群导出包目录")
+    parser.add_argument("--bundle", help="导出包目录")
     parser.add_argument("--dataset", default="dataset/shipbench", help="数据集根目录")
+    parser.add_argument("--reindex", action="store_true",
+                        help="只按条目目录里的 meta.json 重建 index.json")
     args = parser.parse_args()
+
+    if args.reindex:
+        index = reindex(args.dataset)
+        print(f"index.json 已重建：{index['n_entries']} 条条目")
+        return
+    if not args.bundle:
+        parser.error("要么给 --bundle，要么给 --reindex")
 
     meta = build_entry(args.bundle, args.dataset)
     update_index(args.dataset, meta)
