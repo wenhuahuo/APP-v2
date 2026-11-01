@@ -5,6 +5,9 @@
 便于跨 epoch 比较。
 `train_strides` 给出训练时的查询密度档位（1 = 标签点集原密度），每步随机取一档。
 计算设备由配置的 `device` 显式给出（`cpu` / `cuda`），不做自动回退。
+
+验证要在整条验证集上前向，比一轮训练贵；`VALIDATION_INTERVAL` 给出验证间隔，
+最后一轮无论间隔如何都验证一次，`best.pt` 只在实际验证的轮次上按验证损失更新。
 """
 
 from pathlib import Path
@@ -14,6 +17,8 @@ import torch
 from collate import collate_samples
 from losses import appsolver_loss
 from ship_dataset import ShipDataset
+
+VALIDATION_INTERVAL = 5
 
 
 class Trainer:
@@ -97,20 +102,31 @@ class Trainer:
     def run(self):
         best = float("inf")
         history = []
-        for epoch in range(self.config["epochs"]):
+        epochs = self.config["epochs"]
+        for epoch in range(epochs):
             train_loss = self.train_epoch(epoch)
-            metrics = self.evaluate()
-            validation = metrics["flow"] + self.config["lambda_hull"] * metrics["hull"]
-            history.append({"epoch": epoch, "train": train_loss, "validation": validation,
-                            **{key: float(value) for key, value in metrics.items()}})
-            print(f"epoch {epoch:3d}  train {train_loss:.5f}  "
-                  f"val flow {float(metrics['flow']):.5f}  val hull {float(metrics['hull']):.5f}")
-            # 两条选择规则都留档：best.pt 按验证损失选（早停），last.pt 是最后一轮。
-            # 训练集条目很少时验证损失往往在最初几轮最低，只看 best.pt 会报成欠训练。
+            # 轮次从 1 起数（第 epoch+1 轮），因此 100 轮配置的第 100 轮正好落在间隔上；
+            # 轮数不是 5 的倍数时由 `epoch == epochs - 1` 兜住最后一轮。
+            validate = (epoch + 1) % VALIDATION_INTERVAL == 0 or epoch == epochs - 1
+            record = {"epoch": epoch, "train": train_loss}
+            # last.pt 每轮都写：训练被打断时也有最近状态的模型可用。
             checkpoint = {"model": self.model.state_dict(), "config": self.full_config,
                           "epoch": epoch}
             torch.save(checkpoint, self.output_dir / "last.pt")
-            if validation < best:
-                best = validation
-                torch.save(checkpoint, self.output_dir / "best.pt")
+            if validate:
+                metrics = self.evaluate()
+                validation = metrics["flow"] + self.config["lambda_hull"] * metrics["hull"]
+                record["validation"] = validation
+                record.update({key: float(value) for key, value in metrics.items()})
+                print(f"epoch {epoch:3d}  train {train_loss:.5f}  "
+                      f"val flow {float(metrics['flow']):.5f}  "
+                      f"val hull {float(metrics['hull']):.5f}")
+                # 两条选择规则都留档：best.pt 按验证损失选（早停），last.pt 每轮覆盖。
+                # 训练集条目很少时验证损失往往在最初几轮最低，只看 best.pt 会报成欠训练。
+                if validation < best:
+                    best = validation
+                    torch.save(checkpoint, self.output_dir / "best.pt")
+            else:
+                print(f"epoch {epoch:3d}  train {train_loss:.5f}")
+            history.append(record)
         return history

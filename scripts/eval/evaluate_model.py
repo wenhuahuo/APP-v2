@@ -2,7 +2,8 @@
 
 预测与真值都换算回物理量（波高 m、速度 m/s、液面与船面 Cp）；`stride` 依次给查询
 点集密度，训练用过的档位是直接评估，其余是跨分辨率评估。指标写
-`output/<配置文件名>/metrics.json`。
+`output/<配置文件名>/metrics.json`；控制台只按划分与 `stride` 汇总条目（mean±std），
+每个划分两张表：R²↑ 与 RMSE↓。
 
 用法:
     python3 scripts/eval/evaluate_model.py --config configs/appsolver_v2_kcs_normal_wide.yaml
@@ -24,6 +25,7 @@ from build import build_model  # noqa: E402
 from evaluate import CHUNK  # noqa: E402
 from normalize import Normalizer  # noqa: E402
 from query_density import density_sweep  # noqa: E402
+from report import summary_lines  # noqa: E402
 
 STRIDES = (1, 2, 4, 8)
 
@@ -64,18 +66,8 @@ def main():
     metrics_path.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n")
     print(f"{config['model_type']}，{args.checkpoint} epoch {checkpoint['epoch']}，"
           f"指标写入 {metrics_path}")
-    for split, entries in splits.items():
-        print(f"\n{split}（{len(entries)} 个条目）")
-        for entry_id in entries:
-            print(f"  {entry_id}")
-            print("    stride  " + "  ".join(f"{channel:>8s}"
-                                             for channel in ("eta", "u", "v", "w", "Cp"))
-                  + "   hull Cp    eta RMSE")
-            for stride in args.strides:
-                block = results["strides"][split][stride][entry_id]
-                values = "  ".join(f"{r2:+8.4f}" for r2 in block["flow"]["r2"])
-                print(f"    {stride:^6d}  {values}   {block['hull']['r2'][0]:+.4f}"
-                      f"   {block['flow']['rmse'][0] * 1000:6.3f} mm")
+    for line in summary_lines(splits, results["strides"], args.strides):
+        print(line)
 
 
 if __name__ == "__main__":
