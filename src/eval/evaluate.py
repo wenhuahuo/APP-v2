@@ -44,11 +44,8 @@ def predict_entry(model, normalizer, sample, device, chunk=CHUNK):
     return flow, hull, index
 
 
-@torch.no_grad()
-def evaluate_entry(model, normalizer, sample, device, chunk=CHUNK):
-    """在条目当前密度的格点（掩除位除外）与整条湿表面上算指标。"""
-    flow_prediction, hull_prediction, index = predict_entry(
-        model, normalizer, sample, device, chunk)
+def _entry_metrics(flow_prediction, hull_prediction, sample, index):
+    """在指定流场点与整条湿表面上比较预测和真值。"""
     scale = physical_flow_scale(sample["scale"])
     flow_target = sample["flow_target"].reshape(-1, 5)[index] * scale
     flow = channel_metrics(flow_prediction, flow_target, sample["flow_weight"].reshape(-1)[index])
@@ -61,3 +58,20 @@ def evaluate_entry(model, normalizer, sample, device, chunk=CHUNK):
         "hull": {"channels": list(HULL_CHANNELS), "units": list(HULL_UNITS), **hull,
                  "n_points": int(len(hull_target))},
     }
+
+
+@torch.no_grad()
+def evaluate_zero_entry(sample):
+    """恒零预测基线：直接在物理量空间令所有输出为零。"""
+    index = torch.nonzero(sample["flow_mask"].reshape(-1), as_tuple=False).squeeze(-1)
+    flow_target = sample["flow_target"].reshape(-1, 5)[index]
+    return _entry_metrics(torch.zeros_like(flow_target),
+                          torch.zeros_like(sample["hull_pressure"]), sample, index)
+
+
+@torch.no_grad()
+def evaluate_entry(model, normalizer, sample, device, chunk=CHUNK):
+    """在条目当前密度的格点（掩除位除外）与整条湿表面上算指标。"""
+    flow_prediction, hull_prediction, index = predict_entry(
+        model, normalizer, sample, device, chunk)
+    return _entry_metrics(flow_prediction, hull_prediction, sample, index)
