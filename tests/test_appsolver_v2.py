@@ -13,6 +13,7 @@ for name in ("datapipe", "app", "model", "train"):
 from appsolver_v2 import APPSolverV2  # noqa: E402
 from collate import collate_samples  # noqa: E402
 from ship_dataset import ShipDataset  # noqa: E402
+from tokenizer import flow_tokens  # noqa: E402
 
 DATASET = ROOT / "dataset" / "shipbench"
 ENTRY = "kcs_fr026_normal_mesh"
@@ -61,6 +62,37 @@ class APPSolverV2Test(unittest.TestCase):
         missing = [name for name, parameter in model.named_parameters()
                    if parameter.grad is None or not torch.isfinite(parameter.grad).all()]
         self.assertEqual(missing, [])
+
+    def test_flow_only_without_sdf_feature(self):
+        model = build_model(domains=("flow",), flow_sdf=False)
+        output = model(self.batch, self.queries[..., :2])
+        self.assertEqual(set(output), {"flow"})
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
+        self.assertIsNone(model.hull_head)
+
+    def test_hull_only_does_not_require_flow_queries(self):
+        model = build_model(domains=("hull",), flow_sdf=False)
+        output = model(self.batch)
+        self.assertEqual(set(output), {"hull"})
+        self.assertEqual(tuple(output["hull"].shape),
+                         (1, self.batch["hull_uv"].shape[1], 1))
+        self.assertIsNone(model.flow_head)
+
+    def test_joint_without_sdf_feature(self):
+        model = build_model(flow_sdf=False)
+        output = model(self.batch, self.queries[..., :2])
+        self.assertEqual(set(output), {"flow", "hull"})
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
+
+    def test_sdf_feature_toggle_preserves_partition(self):
+        tiers = [[0.05, 0.02], [0.2, 0.05], [None, 0.15]]
+        with_sdf = flow_tokens(self.batch, 0, tiers, use_sdf=True)
+        without_sdf = flow_tokens(self.batch, 0, tiers, use_sdf=False)
+        self.assertEqual(with_sdf[0].shape[1], 3)
+        self.assertEqual(without_sdf[0].shape[1], 2)
+        torch.testing.assert_close(without_sdf[0], with_sdf[0][:, :2])
+        torch.testing.assert_close(without_sdf[1], with_sdf[1])
+        torch.testing.assert_close(without_sdf[2], with_sdf[2])
 
 
 if __name__ == "__main__":

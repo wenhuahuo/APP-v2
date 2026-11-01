@@ -27,13 +27,13 @@ def tokenize(features, weights, extent, tolerance, scale=1.0, max_level=12):
     return tokens, torch.from_numpy(partition.areas), centres
 
 
-def flow_tokens(batch, index, size_tiers, max_level=12):
-    """流场域：掩除格点先剔除，再按到船体水线的距离分档定 patch 物理边长。"""
+def flow_tokens(batch, index, size_tiers, max_level=12, use_sdf=True):
+    """流场域：SDF 始终用于自适应分档，但是否写入 token 由 use_sdf 控制。"""
     mask = batch["flow_mask"][index].cpu().reshape(-1)
     coords = batch["flow_coords"][index].cpu().reshape(-1, 2)[mask]
     sdf = batch["flow_sdf"][index].cpu().reshape(-1)[mask]
     weights = batch["flow_weight"][index].cpu().reshape(-1)[mask]
-    features = torch.column_stack([coords, sdf])
+    features = torch.column_stack([coords, sdf]) if use_sdf else coords
     tolerance = tiered_tolerance(sdf.numpy(), size_tiers)
     return tokenize(features, weights, tuple(batch["flow_extent"][index].tolist()), tolerance,
                     1.0, max_level)

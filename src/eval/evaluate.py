@@ -26,38 +26,54 @@ def predict_entry(model, normalizer, sample, device, chunk=CHUNK):
     """
     model.eval()
     batch = {key: value.to(device) for key, value in collate_samples([sample]).items()}
-    index = torch.nonzero(sample["flow_mask"].reshape(-1), as_tuple=False).squeeze(-1)
-    coords = sample["flow_coords"].reshape(-1, 2)
-    sdf = sample["flow_sdf"].reshape(-1)
-    prediction = []
-    for start in range(0, len(index), chunk):
-        part = index[start:start + chunk]
-        queries = torch.column_stack([coords[part], sdf[part]])[None].to(device)
-        output = model(batch, queries)
-        prediction.append(output["flow"][0].cpu())
+    domains = getattr(model, "domains", ("flow", "hull"))
+    flow_prediction = None
+    hull_prediction = None
+    index = None
+    if "flow" in domains:
+        index = torch.nonzero(sample["flow_mask"].reshape(-1), as_tuple=False).squeeze(-1)
+        coords = sample["flow_coords"].reshape(-1, 2)
+        sdf = sample["flow_sdf"].reshape(-1)
+        prediction = []
+        for start in range(0, len(index), chunk):
+            part = index[start:start + chunk]
+            query_coords = coords[part]
+            queries = (torch.column_stack([query_coords, sdf[part]])
+                       if getattr(model, "use_flow_sdf", True) else query_coords)
+            output = model(batch, queries[None].to(device))
+            prediction.append(output["flow"][0].cpu())
+            if "hull" in domains:
+                hull_prediction = output["hull"][0][:, 0].cpu()
+        flow_prediction = torch.cat(prediction)
+    elif "hull" in domains:
+        output = model(batch)
         hull_prediction = output["hull"][0][:, 0].cpu()
-    prediction = torch.cat(prediction)
 
-    scale = physical_flow_scale(sample["scale"])
-    flow = (normalizer.flow_mean + normalizer.flow_std * prediction) * scale
-    hull = normalizer.hull_mean + normalizer.hull_std * hull_prediction
-    return flow, hull, index
+    if flow_prediction is not None:
+        scale = physical_flow_scale(sample["scale"])
+        flow_prediction = (normalizer.flow_mean + normalizer.flow_std * flow_prediction) * scale
+    if hull_prediction is not None:
+        hull_prediction = normalizer.hull_mean + normalizer.hull_std * hull_prediction
+    return flow_prediction, hull_prediction, index
 
 
 def _entry_metrics(flow_prediction, hull_prediction, sample, index):
     """在指定流场点与整条湿表面上比较预测和真值。"""
-    scale = physical_flow_scale(sample["scale"])
-    flow_target = sample["flow_target"].reshape(-1, 5)[index] * scale
-    flow = channel_metrics(flow_prediction, flow_target, sample["flow_weight"].reshape(-1)[index])
-
-    hull_target = sample["hull_pressure"]
-    hull = channel_metrics(hull_prediction[:, None], hull_target[:, None], sample["hull_weight"])
-    return {
-        "flow": {"channels": list(FLOW_CHANNELS), "units": list(FLOW_UNITS), **flow,
-                 "n_points": int(len(index))},
-        "hull": {"channels": list(HULL_CHANNELS), "units": list(HULL_UNITS), **hull,
-                 "n_points": int(len(hull_target))},
-    }
+    result = {}
+    if flow_prediction is not None:
+        scale = physical_flow_scale(sample["scale"])
+        flow_target = sample["flow_target"].reshape(-1, 5)[index] * scale
+        flow = channel_metrics(flow_prediction, flow_target,
+                               sample["flow_weight"].reshape(-1)[index])
+        result["flow"] = {"channels": list(FLOW_CHANNELS), "units": list(FLOW_UNITS), **flow,
+                          "n_points": int(len(index))}
+    if hull_prediction is not None:
+        hull_target = sample["hull_pressure"]
+        hull = channel_metrics(hull_prediction[:, None], hull_target[:, None],
+                               sample["hull_weight"])
+        result["hull"] = {"channels": list(HULL_CHANNELS), "units": list(HULL_UNITS), **hull,
+                          "n_points": int(len(hull_target))}
+    return result
 
 
 @torch.no_grad()

@@ -30,15 +30,21 @@ class APPSolverV2(nn.Module):
                  encoder_layers=2, decoder_layers=2, mlp_ratio=4.0, dropout=0.0,
                  positional="fourier", query_basis="siren", fourier_features=16,
                  fourier_scale=4.0, condition_dim=2, conditioning="film",
-                 flow_channels=5, hull_channels=1, max_level=12):
+                 flow_channels=5, hull_channels=1, max_level=12,
+                 domains=("flow", "hull"), flow_sdf=True):
         super().__init__()
+        self.domains = tuple(domains)
+        if not self.domains or set(self.domains) - {"flow", "hull"}:
+            raise ValueError(f"未知或空的预测域: {self.domains}")
+        self.use_flow_sdf = flow_sdf
         self.flow_size_tiers = flow_size_tiers
         self.hull_size = hull_size
         self.max_level = max_level
         self.positional = positional
 
-        self.flow_input = nn.Linear(len(FLOW_FEATURES), d_model)
-        self.hull_input = nn.Linear(len(HULL_FEATURES), d_model)
+        flow_features = FLOW_FEATURES if flow_sdf else FLOW_FEATURES[:2]
+        self.flow_input = nn.Linear(len(flow_features), d_model) if "flow" in self.domains else None
+        self.hull_input = nn.Linear(len(HULL_FEATURES), d_model) if "hull" in self.domains else None
         self.domain = nn.Embedding(2, d_model)
         self.position = (nn.Linear(2 * fourier_features, d_model)
                          if positional == "fourier" else None)
@@ -50,29 +56,36 @@ class APPSolverV2(nn.Module):
         self.encoder = Encoder(d_model, nhead, encoder_layers, mlp_ratio, dropout, rope,
                                conditioning, condition_dim)
         self.basis = QueryBasis(2, d_model, query_basis, fourier_scale)
-        self.flow_extra = nn.Linear(len(FLOW_FEATURES) - 2, d_model)
-        self.hull_extra = nn.Linear(len(HULL_FEATURES) - 2, d_model)
+        self.flow_extra = (nn.Linear(len(flow_features) - 2, d_model)
+                           if "flow" in self.domains and flow_sdf else None)
+        self.hull_extra = (nn.Linear(len(HULL_FEATURES) - 2, d_model)
+                           if "hull" in self.domains else None)
         self.decoder = QueryDecoder(d_model, nhead, decoder_layers, mlp_ratio, dropout, rope,
                                     conditioning, condition_dim)
-        self.flow_head = nn.Linear(d_model, flow_channels)
-        self.hull_head = nn.Linear(d_model, hull_channels)
+        self.flow_head = nn.Linear(d_model, flow_channels) if "flow" in self.domains else None
+        self.hull_head = nn.Linear(d_model, hull_channels) if "hull" in self.domains else None
 
-    def forward(self, batch, flow_queries):
-        """batch 为 `collate_samples` 的输出；flow_queries (B,Q,3) 为 [x, y, sdf]。"""
+    def forward(self, batch, flow_queries=None):
+        """flow_queries (B,Q,2/3) 为 [x, y] 或 [x, y, sdf]；仅返回启用的预测域。"""
         condition = batch["condition"]
 
         tokens, weight, coords = self._pad_tokens(
             [self._tokenize(batch, i) for i in range(len(condition))])
         memory = self.encoder(tokens, weight, coords, condition)
 
-        flow = self.flow_head(self._decode(flow_queries, self.flow_extra, memory, weight,
-                                          coords, condition))
-        hull = self.hull_head(self._decode(self._hull_queries(batch), self.hull_extra, memory,
-                                          weight, coords, condition))
-        return {"flow": flow, "hull": hull}
+        output = {}
+        if "flow" in self.domains:
+            output["flow"] = self.flow_head(self._decode(
+                flow_queries, self.flow_extra, memory, weight, coords, condition))
+        if "hull" in self.domains:
+            output["hull"] = self.hull_head(self._decode(
+                self._hull_queries(batch), self.hull_extra, memory, weight, coords, condition))
+        return output
 
     def _decode(self, queries, extra, memory, weight, coords, condition):
-        embedding = self.basis(queries[..., :2]) + extra(queries[..., 2:])
+        embedding = self.basis(queries[..., :2])
+        if extra is not None:
+            embedding = embedding + extra(queries[..., 2:])
         return self.decoder(embedding, memory, weight, queries[..., :2], coords, condition)
 
     def _position(self, centres):
@@ -91,11 +104,17 @@ class APPSolverV2(nn.Module):
 
     def _tokenize(self, batch, i):
         """分词在 CPU 上用 numpy 做（分区与积分），token 再搬到参数所在设备。"""
-        flow = self._domain_token(flow_tokens(batch, i, self.flow_size_tiers, self.max_level),
-                                  self.flow_input, 0)
-        hull = self._domain_token(hull_tokens(batch, i, self.hull_size, self.max_level),
-                                  self.hull_input, 1)
-        return tuple(torch.cat([flow[k], hull[k]]) for k in range(3))
+        patches = []
+        if "flow" in self.domains:
+            patches.append(self._domain_token(
+                flow_tokens(batch, i, self.flow_size_tiers, self.max_level,
+                            use_sdf=self.use_flow_sdf), self.flow_input, 0))
+        if "hull" in self.domains:
+            patches.append(self._domain_token(
+                hull_tokens(batch, i, self.hull_size, self.max_level), self.hull_input, 1))
+        if len(patches) == 1:
+            return patches[0]
+        return tuple(torch.cat([patch[k] for patch in patches]) for k in range(3))
 
     @staticmethod
     def _pad_tokens(per_sample):

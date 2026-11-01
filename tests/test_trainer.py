@@ -16,6 +16,7 @@ for name in ("datapipe", "train"):
     sys.path.insert(0, str(ROOT / "src" / name))
 
 from trainer import Trainer  # noqa: E402
+from losses import appsolver_loss  # noqa: E402
 
 
 class SampleQueriesTest(unittest.TestCase):
@@ -27,6 +28,38 @@ class SampleQueriesTest(unittest.TestCase):
         self.assertGreaterEqual(int(index[:, 1].max()), 140)
         self.assertGreaterEqual(int(index[:, 0].min()), 0)
         self.assertLessEqual(int(index[:, 1].max()), 150)
+
+
+class SingleDomainLossTest(unittest.TestCase):
+    def test_only_active_domain_contributes_to_total(self):
+        prediction = torch.tensor([[1.0], [2.0]])
+        target = torch.zeros_like(prediction)
+        weight = torch.ones(2)
+        flow = appsolver_loss((prediction, target, weight), None, lambda_hull=0.5)
+        hull = appsolver_loss(None, (prediction, target, weight), lambda_hull=0.5)
+        self.assertEqual(set(flow), {"flow", "total"})
+        self.assertEqual(set(hull), {"hull", "total"})
+        self.assertAlmostEqual(float(flow["total"]), 2.5)
+        self.assertAlmostEqual(float(hull["total"]), 1.25)
+
+
+class EvaluateTest(unittest.TestCase):
+    def test_validation_only_returns_active_domain(self):
+        for domain in ("flow", "hull"):
+            with self.subTest(domain=domain):
+                trainer = object.__new__(Trainer)
+                trainer.model = types.SimpleNamespace(eval=lambda: None)
+                trainer.config = {"train_strides": [1], "lambda_hull": 0.5}
+                trainer.domains = (domain,)
+                trainer.validation = {1: [None]}
+                trainer.val_queries = None
+                tensors = (torch.ones(1, 1), torch.zeros(1, 1), torch.ones(1))
+                trainer._forward = lambda sample, index: (
+                    None, tensors if domain == "flow" else None,
+                    tensors if domain == "hull" else None)
+                metrics = trainer.evaluate()
+                self.assertEqual(set(metrics), {domain})
+                self.assertEqual(float(metrics[domain]), 1.0)
 
 
 class RunTest(unittest.TestCase):

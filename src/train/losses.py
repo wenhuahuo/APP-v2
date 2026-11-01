@@ -14,8 +14,14 @@ def weighted_mse(prediction, target, weight):
 
 
 def appsolver_loss(flow, hull, lambda_hull=1.0):
-    """flow、hull 各为 (prediction, target, weight) 三元组。"""
-    flow_loss = weighted_mse(*flow)
-    hull_loss = weighted_mse(*hull)
-    return {"flow": flow_loss, "hull": hull_loss,
-            "total": flow_loss + lambda_hull * hull_loss}
+    """flow、hull 为三元组或 None；总损失只包含启用的预测域。"""
+    losses = {}
+    total = 0.0
+    if flow is not None:
+        losses["flow"] = weighted_mse(*flow)
+        total = total + losses["flow"]
+    if hull is not None:
+        losses["hull"] = weighted_mse(*hull)
+        total = total + lambda_hull * losses["hull"]
+    losses["total"] = total
+    return losses

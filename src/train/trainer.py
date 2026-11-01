@@ -27,6 +27,8 @@ class Trainer:
         self.normalizer = normalizer
         self.full_config = config
         self.config = config["train"]
+        self.domains = getattr(model, "domains", ("flow", "hull"))
+        self.use_flow_sdf = getattr(model, "use_flow_sdf", True)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -44,9 +46,9 @@ class Trainer:
             model.parameters(), lr=config["learning_rate"],
             weight_decay=config["weight_decay"])
         validation = self.validation[config["train_strides"][0]]
-        self.val_queries = self._sample_queries(config["val_queries"],
-                                                torch.Generator().manual_seed(config["seed"]),
-                                                validation)
+        self.val_queries = (self._sample_queries(
+            config["val_queries"], torch.Generator().manual_seed(config["seed"]), validation)
+            if "flow" in self.domains else None)
 
     @staticmethod
     def _sample_queries(count, generator, dataset):
@@ -57,17 +59,25 @@ class Trainer:
 
     def _forward(self, sample, index):
         batch = {key: value.to(self.device) for key, value in collate_samples([sample]).items()}
-        queries = torch.column_stack([
-            sample["flow_coords"][index[:, 0], index[:, 1]],
-            sample["flow_sdf"][index[:, 0], index[:, 1]],
-        ])[None].to(self.device)
+        queries = None
+        flow = None
+        hull = None
+        if "flow" in self.domains:
+            queries = sample["flow_coords"][index[:, 0], index[:, 1]]
+            if self.use_flow_sdf:
+                queries = torch.column_stack([
+                    queries, sample["flow_sdf"][index[:, 0], index[:, 1]]])
+            queries = queries[None].to(self.device)
         output = self.model(batch, queries)
-        flow_target = self.normalizer.flow(
-            sample["flow_target"][index[:, 0], index[:, 1]])[None].to(self.device)
-        flow_weight = sample["flow_weight"][index[:, 0], index[:, 1]][None].to(self.device)
-        hull_target = self.normalizer.hull(sample["hull_pressure"])[:, None][None].to(self.device)
-        return output, (output["flow"][0], flow_target[0], flow_weight[0]), \
-            (output["hull"][0], hull_target[0], batch["hull_weight"][0])
+        if "flow" in self.domains:
+            flow_target = self.normalizer.flow(
+                sample["flow_target"][index[:, 0], index[:, 1]])[None].to(self.device)
+            flow_weight = sample["flow_weight"][index[:, 0], index[:, 1]][None].to(self.device)
+            flow = (output["flow"][0], flow_target[0], flow_weight[0])
+        if "hull" in self.domains:
+            hull_target = self.normalizer.hull(sample["hull_pressure"])[:, None][None].to(self.device)
+            hull = (output["hull"][0], hull_target[0], batch["hull_weight"][0])
+        return output, flow, hull
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -77,7 +87,8 @@ class Trainer:
             stride = strides[step % len(strides)]
             dataset = self.datasets[stride]
             sample = dataset[step % len(dataset)]
-            index = self._sample_queries(self.config["batch_queries"], self.generator, dataset)
+            index = (self._sample_queries(self.config["batch_queries"], self.generator, dataset)
+                     if "flow" in self.domains else None)
             _, flow, hull = self._forward(sample, index)
             losses = appsolver_loss(flow, hull, self.config["lambda_hull"])
 
@@ -91,12 +102,12 @@ class Trainer:
     def evaluate(self):
         self.model.eval()
         dataset = self.validation[self.config["train_strides"][0]]
-        totals = {"flow": 0.0, "hull": 0.0}
+        totals = {domain: 0.0 for domain in self.domains}
         for i in range(len(dataset)):
             _, flow, hull = self._forward(dataset[i], self.val_queries)
             losses = appsolver_loss(flow, hull, self.config["lambda_hull"])
-            totals["flow"] += losses["flow"]
-            totals["hull"] += losses["hull"]
+            for key in totals:
+                totals[key] += losses[key]
         return {key: value / len(dataset) for key, value in totals.items()}
 
     def run(self):
@@ -115,12 +126,13 @@ class Trainer:
             torch.save(checkpoint, self.output_dir / "last.pt")
             if validate:
                 metrics = self.evaluate()
-                validation = metrics["flow"] + self.config["lambda_hull"] * metrics["hull"]
+                validation = (metrics.get("flow", 0.0)
+                              + self.config["lambda_hull"] * metrics.get("hull", 0.0))
                 record["validation"] = validation
                 record.update({key: float(value) for key, value in metrics.items()})
-                print(f"epoch {epoch:3d}  train {train_loss:.5f}  "
-                      f"val flow {float(metrics['flow']):.5f}  "
-                      f"val hull {float(metrics['hull']):.5f}")
+                details = "".join(f"  val {key} {float(value):.5f}"
+                                  for key, value in metrics.items())
+                print(f"epoch {epoch:3d}  train {train_loss:.5f}{details}")
                 # 两条选择规则都留档：best.pt 按验证损失选（早停），last.pt 每轮覆盖。
                 # 训练集条目很少时验证损失往往在最初几轮最低，只看 best.pt 会报成欠训练。
                 if validation < best:

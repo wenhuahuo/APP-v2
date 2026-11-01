@@ -48,15 +48,22 @@ def _cell(values, scale, quantity):
 def table_lines(split, entries, blocks, strides, quantity):
     """一个划分、一种指标（`r2` 或 `rmse`）的表；`blocks` 是 {stride: {条目: 指标}}。"""
     title = "R²↑（越高越好）" if quantity == "r2" else "RMSE↓（越低越好）"
+    sample = next(iter(blocks[strides[0]].values()))
+    columns = COLUMNS
+    if "flow" not in sample:
+        columns = COLUMNS[FLOW_COLUMNS:]
+    elif "hull" not in sample:
+        columns = COLUMNS[:FLOW_COLUMNS]
+    column_offset = 0 if "flow" in sample else FLOW_COLUMNS
     header = f"{'stride':>8s}" + "".join(
-        f"{_heading(label, unit, quantity):>{CELL}s}" for label, _, unit in COLUMNS)
+        f"{_heading(label, unit, quantity):>{CELL}s}" for label, _, unit in columns)
     lines = [f"\n{split}（{len(entries)} 个条目）  {title}", header]
     for stride in strides:
-        values = [channel_values(blocks[stride], column, quantity)
-                  for column in range(len(COLUMNS))]
+        values = [channel_values(blocks[stride], column_offset + column, quantity)
+                  for column in range(len(columns))]
         line = f"{stride:^8d}" + "".join(
             f"{_cell(value, scale, quantity):>{CELL}s}"
-            for value, (_, scale, _) in zip(values, COLUMNS))
+            for value, (_, scale, _) in zip(values, columns))
         lines.append(line)
     return lines
 

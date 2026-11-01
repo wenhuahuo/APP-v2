@@ -87,6 +87,21 @@ class TableTest(unittest.TestCase):
         self.assertTrue(titles[2].startswith("val") and "R²↑" in titles[2])
         self.assertTrue(titles[3].startswith("val") and "RMSE↓" in titles[3])
 
+    def test_single_domain_tables_only_show_active_channels(self):
+        all_blocks = blocks()
+        flow_blocks = {stride: {entry: {"flow": record["flow"]}
+                                for entry, record in records.items()}
+                       for stride, records in all_blocks.items()}
+        hull_blocks = {stride: {entry: {"hull": record["hull"]}
+                                for entry, record in records.items()}
+                       for stride, records in all_blocks.items()}
+        flow_header = table_lines("val", ENTRIES, flow_blocks, STRIDES, "rmse")[1]
+        hull_header = table_lines("val", ENTRIES, hull_blocks, STRIDES, "rmse")[1]
+        self.assertIn("eta[mm]", flow_header)
+        self.assertNotIn("hull Cp", flow_header)
+        self.assertIn("hull Cp", hull_header)
+        self.assertNotIn("eta[mm]", hull_header)
+
 
 if __name__ == "__main__":
     unittest.main()
