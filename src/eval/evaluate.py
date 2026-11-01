@@ -26,20 +26,17 @@ def predict_entry(model, normalizer, sample, device, chunk=CHUNK):
     """
     model.eval()
     batch = {key: value.to(device) for key, value in collate_samples([sample]).items()}
-    domains = getattr(model, "domains", ("flow", "hull"))
+    domains = getattr(model, "output_domains", ("flow", "hull"))
     flow_prediction = None
     hull_prediction = None
     index = None
     if "flow" in domains:
         index = torch.nonzero(sample["flow_mask"].reshape(-1), as_tuple=False).squeeze(-1)
         coords = sample["flow_coords"].reshape(-1, 2)
-        sdf = sample["flow_sdf"].reshape(-1)
         prediction = []
         for start in range(0, len(index), chunk):
             part = index[start:start + chunk]
-            query_coords = coords[part]
-            queries = (torch.column_stack([query_coords, sdf[part]])
-                       if getattr(model, "use_flow_sdf", True) else query_coords)
+            queries = coords[part]
             output = model(batch, queries[None].to(device))
             prediction.append(output["flow"][0].cpu())
             if "hull" in domains:

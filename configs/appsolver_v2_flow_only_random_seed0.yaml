@@ -1,11 +1,12 @@
-# 框架消融 flow_only：random_seed0 划分；仅改预测域与 SDF 输入特征，自适应 patch 规则及训练超参不变
+# 船体融合机制消融 flow_only：random_seed0 划分；仅改输入域和输出域，其余训练超参不变
 # 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 176 / val 31；其余超参与 appsolver_v2_multihull_normal.yaml 一致
 stats: dataset/shipbench/stats_random_seed0.json
 model_type: appsolver_v2
 model:
-  domains:
+  input_domains:
   - flow
-  flow_sdf: false
+  output_domains:
+  - flow
   flow_size_tiers:
   - - 0.05
     - 0.02

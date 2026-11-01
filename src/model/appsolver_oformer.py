@@ -23,7 +23,7 @@ class APPSolverOFormer(nn.Module):
         self.flow_size_tiers = flow_size_tiers
         self.hull_size = hull_size
         self.max_level = max_level
-        self.flow_input = nn.Linear(3, d_model)
+        self.flow_input = nn.Linear(2, d_model)
         self.hull_input = nn.Linear(8, d_model)
         self.condition = ConditionBias(condition_dim, d_model)
         self.encoder = nn.ModuleList([

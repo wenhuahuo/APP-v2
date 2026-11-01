@@ -49,8 +49,9 @@ def profile(config_path, dataset, entry, device):
     model = build_model(config).to(device).train()
     sample = ShipDataset(dataset, [entry], stride=1)[0]
     batch = {key: value.to(device) for key, value in collate_samples([sample]).items()}
-    queries = torch.column_stack([batch["flow_coords"].reshape(-1, 2),
-                                  batch["flow_sdf"].reshape(-1)])[None]
+    query_coords = batch["flow_coords"].reshape(-1, 2)
+    queries = (query_coords[None] if config["model_type"] == "appsolver_v2" else
+               torch.column_stack([query_coords, batch["flow_sdf"].reshape(-1)])[None])
 
     # FlopCounterMode 依赖 autograd 的 grad_fn，因此不能包在 no_grad 里
     counter = FlopCounterMode(display=False)

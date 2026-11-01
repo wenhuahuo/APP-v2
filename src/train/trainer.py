@@ -27,8 +27,7 @@ class Trainer:
         self.normalizer = normalizer
         self.full_config = config
         self.config = config["train"]
-        self.domains = getattr(model, "domains", ("flow", "hull"))
-        self.use_flow_sdf = getattr(model, "use_flow_sdf", True)
+        self.domains = getattr(model, "output_domains", ("flow", "hull"))
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -63,11 +62,7 @@ class Trainer:
         flow = None
         hull = None
         if "flow" in self.domains:
-            queries = sample["flow_coords"][index[:, 0], index[:, 1]]
-            if self.use_flow_sdf:
-                queries = torch.column_stack([
-                    queries, sample["flow_sdf"][index[:, 0], index[:, 1]]])
-            queries = queries[None].to(self.device)
+            queries = sample["flow_coords"][index[:, 0], index[:, 1]][None].to(self.device)
         output = self.model(batch, queries)
         if "flow" in self.domains:
             flow_target = self.normalizer.flow(
