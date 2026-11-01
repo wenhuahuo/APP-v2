@@ -83,6 +83,20 @@ class APPSolverV2Test(unittest.TestCase):
         self.assertIsNotNone(model.hull_input)
         self.assertIsNone(model.hull_head)
 
+    def test_uniform_partition(self):
+        model = build_model(flow_tokenizer="uniform", flow_uniform_size=0.1)
+        output = model(self.batch, self.queries)
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
+
+    def test_learned_partition_forward_and_gradients(self):
+        model = build_model(flow_tokenizer="learned", flow_learned_tokens=16)
+        output = model(self.batch, self.queries)
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
+        (output["flow"].sum() + output["hull"].sum()).backward()
+        for parameter in model.learned_flow.parameters():
+            self.assertIsNotNone(parameter.grad)
+            self.assertTrue(torch.isfinite(parameter.grad).all())
+
     def test_flow_tokens_contain_only_coordinates(self):
         tiers = [[0.05, 0.02], [0.2, 0.05], [None, 0.15]]
         tokens, _, _ = flow_tokens(self.batch, 0, tiers)

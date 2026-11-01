@@ -2,8 +2,8 @@
 
 流程（每个样本）：
 
-1. 流场域与船体域各自按物理尺寸划 patch，token = patch 内 Δ 加权平均；
-   流场域 patch 的容差按到船体水线的距离分档（薄 patch 只出现在船体附近）。
+1. 船体域按物理尺寸划 patch；流场域默认按到船体水线的距离自适应划分，
+   也可配置为均匀硬分块或学习软分块，token 均为求积加权平均；
 2. 两个域的 token 拼成一条序列，加域标记与 patch 形心的位置编码，过一个 transformer。
 3. 查询点（自由液面任意坐标 / 船体湿表面任意 UV）经坐标基与交叉注意力取回该处取值，
    分别过流场头与船面压力头。
@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 
 from encoder import Encoder
+from learned_tokenizer import LearnedTokenizer
 from positional import FourierFeatures
 from query_decoder import QueryBasis, QueryDecoder
 from tokenizer import flow_tokens, hull_tokens
@@ -33,7 +34,8 @@ class APPSolverV2(nn.Module):
                  positional="fourier", query_basis="siren", fourier_features=16,
                  fourier_scale=4.0, condition_dim=2, conditioning="film",
                  flow_channels=5, hull_channels=1, max_level=12,
-                 input_domains=("flow", "hull"), output_domains=("flow", "hull")):
+                 input_domains=("flow", "hull"), output_domains=("flow", "hull"),
+                 flow_tokenizer="adaptive", flow_uniform_size=0.1, flow_learned_tokens=512):
         super().__init__()
         self.input_domains = tuple(input_domains)
         self.output_domains = tuple(output_domains)
@@ -44,11 +46,18 @@ class APPSolverV2(nn.Module):
         self.hull_size = hull_size
         self.max_level = max_level
         self.positional = positional
+        self.flow_tokenizer = flow_tokenizer
+        self.flow_uniform_size = flow_uniform_size
+        if flow_tokenizer not in {"adaptive", "uniform", "learned"}:
+            raise ValueError(f"未知流场分词方法: {flow_tokenizer}")
 
         self.flow_input = (nn.Linear(len(FLOW_FEATURES), d_model)
                            if "flow" in self.input_domains else None)
         self.hull_input = (nn.Linear(len(HULL_FEATURES), d_model)
                            if "hull" in self.input_domains else None)
+        self.learned_flow = (LearnedTokenizer(len(FLOW_FEATURES), d_model, flow_learned_tokens)
+                             if "flow" in self.input_domains and flow_tokenizer == "learned"
+                             else None)
         self.domain = nn.Embedding(2, d_model)
         self.position = (nn.Linear(2 * fourier_features, d_model)
                          if positional == "fourier" else None)
@@ -107,17 +116,29 @@ class APPSolverV2(nn.Module):
                 areas.to(device), centres)
 
     def _tokenize(self, batch, i):
-        """分词在 CPU 上用 numpy 做（分区与积分），token 再搬到参数所在设备。"""
+        """硬分词在 CPU 上完成；学习分词在参数所在设备上进行软分配。"""
         patches = []
         if "flow" in self.input_domains:
-            patches.append(self._domain_token(
-                flow_tokens(batch, i, self.flow_size_tiers, self.max_level), self.flow_input, 0))
+            if self.flow_tokenizer == "learned":
+                flow = self._learned_flow_tokens(batch, i)
+            else:
+                tiers = (self.flow_size_tiers if self.flow_tokenizer == "adaptive"
+                         else [[None, self.flow_uniform_size]])
+                flow = flow_tokens(batch, i, tiers, self.max_level)
+            patches.append(self._domain_token(flow, self.flow_input, 0))
         if "hull" in self.input_domains:
             patches.append(self._domain_token(
                 hull_tokens(batch, i, self.hull_size, self.max_level), self.hull_input, 1))
         if len(patches) == 1:
             return patches[0]
         return tuple(torch.cat([patch[k] for patch in patches]) for k in range(3))
+
+    def _learned_flow_tokens(self, batch, i):
+        device = self.learned_flow.token_embed.device
+        mask = batch["flow_mask"][i].to(device).reshape(-1)
+        features = batch["flow_coords"][i].to(device).reshape(-1, 2)[mask]
+        weights = batch["flow_weight"][i].to(device).reshape(-1)[mask]
+        return self.learned_flow(features, weights)
 
     @staticmethod
     def _pad_tokens(per_sample):
