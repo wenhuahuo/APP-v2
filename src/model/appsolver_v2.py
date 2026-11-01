@@ -8,10 +8,11 @@
 3. 查询点（自由液面任意坐标 / 船体湿表面任意 UV）经坐标基与交叉注意力取回该处取值，
    分别过流场头与船面压力头。
 
-工况参数（Fr、log10 Re）按配置 `conditioning` 逐层注入，不占 token 位：
-`none`（不使用条件编码）/ `film`（默认，block 入口 `x·(1+γ)+β`）/ `adaln` /
-`adaln_zero`（DiT 式，见 `conditioning.py`）。编码器与查询解码器用同一种配置；
-`none` 时两处都没有条件调制参数，工况值不参与前向计算。
+工况参数（Fr、log10 Re）由 `conditioning` 配置融合：`none` / `film` / `adaln` /
+`adaln_zero` / `fourier_add` / `cond_token` / `cond_xattn`。前四种为已有调制路线；
+`fourier_add` 逐层加入 Fourier 工况编码，`cond_token` 向编码器序列添加一个条件
+上下文 token，`cond_xattn` 在每层插入零门控条件交叉注意力。编码器与查询解码器
+共用同一策略，几何坐标位置编码和查询分辨率无关性保持不变。
 """
 
 import numpy as np
@@ -59,6 +60,10 @@ class APPSolverV2(nn.Module):
                              if "flow" in self.input_domains and flow_tokenizer == "learned"
                              else None)
         self.domain = nn.Embedding(2, d_model)
+        self.condition_token = (nn.Linear(condition_dim, d_model)
+                                if conditioning == "cond_token" else None)
+        self.condition_domain = (nn.Parameter(torch.zeros(d_model))
+                                 if conditioning == "cond_token" else None)
         self.position = (nn.Linear(2 * fourier_features, d_model)
                          if positional == "fourier" else None)
         self.fourier = (FourierFeatures(2, fourier_features, fourier_scale)
@@ -84,6 +89,9 @@ class APPSolverV2(nn.Module):
 
         tokens, weight, coords = self._pad_tokens(
             [self._tokenize(batch, i) for i in range(len(condition))])
+        if self.condition_token is not None:
+            tokens, weight, coords = self._add_condition_token(
+                tokens, weight, coords, condition)
         memory = self.encoder(tokens, weight, coords, condition)
 
         output = {}
@@ -139,6 +147,14 @@ class APPSolverV2(nn.Module):
         features = batch["flow_coords"][i].to(device).reshape(-1, 2)[mask]
         weights = batch["flow_weight"][i].to(device).reshape(-1)[mask]
         return self.learned_flow(features, weights)
+
+    def _add_condition_token(self, tokens, weight, coords, condition):
+        token = (self.condition_token(condition) + self.condition_domain)[:, None]
+        leading_weight = weight.new_ones((len(weight), 1))
+        leading_coords = coords.new_zeros((len(coords), 1, 2))
+        return (torch.cat([token, tokens], dim=1),
+                torch.cat([leading_weight, weight], dim=1),
+                torch.cat([leading_coords, coords], dim=1))
 
     @staticmethod
     def _pad_tokens(per_sample):

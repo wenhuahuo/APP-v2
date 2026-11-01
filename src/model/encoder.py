@@ -1,15 +1,13 @@
-"""预归一化 transformer 块，工况参数由配置选择 none / FiLM / adaLN / adaLN-Zero 调制。
+"""预归一化 transformer 块，支持逐层工况调制、加性编码与条件交叉注意力。
 
-工况（Fr、log10 Re）不拼成 token 前缀：v1 已证明该做法拿不到条件增益。这里由
-条件 MLP 生成逐层的调制参数：`film` 在 block 入口做 `x·(1+γ)+β`；`adaln` /
-`adaln_zero` 把 LayerNorm 后的特征按残差分支（注意力 / MLP）分别调制，
-`adaln_zero` 再加逐分支门控。`none` 不构造调制模块、不读取工况值，block 只保留
-原来的注意力与 MLP。参数只与工况维度有关，与 token 数无关。
+`film` / `adaln` / `adaln_zero` 保持原有公式；`fourier_add` 在 block 入口加零初始化
+的工况编码；`cond_xattn` 在原注意力之后插入零门控条件交叉注意力；`none` 与
+`cond_token` 不在 block 内调制，后者由整模型向序列加入条件 token。
 """
 
 import torch.nn as nn
 
-from conditioning import gate_residual, make_conditioning, modulate
+from conditioning import ConditionCrossAttention, gate_residual, make_conditioning, modulate
 from quad_attention import QuadAttention
 
 
@@ -19,6 +17,8 @@ class EncoderBlock(nn.Module):
         super().__init__()
         self.kind = conditioning
         self.modulation = make_conditioning(conditioning, condition_dim, d_model)
+        self.condition_cross = (ConditionCrossAttention(condition_dim, d_model, nhead, dropout)
+                                if conditioning == "cond_xattn" else None)
         self.norm_attention = nn.LayerNorm(d_model)
         self.attention = QuadAttention(d_model, nhead, rope=rope, dropout=dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
@@ -29,10 +29,14 @@ class EncoderBlock(nn.Module):
         )
 
     def forward(self, tokens, weight, coords, condition):
-        if self.kind == "none":
+        if self.kind in {"none", "cond_token", "cond_xattn", "fourier_add"}:
+            if self.kind == "fourier_add":
+                tokens = tokens + self.modulation(condition)
             tokens = tokens + self.attention(self.norm_attention(tokens),
                                             self.norm_attention(tokens),
                                             weight=weight, coords_query=coords, coords_key=coords)
+            if self.condition_cross is not None:
+                tokens = self.condition_cross(tokens, condition)
             tokens = tokens + self.mlp(self.norm_mlp(tokens))
             return tokens
 

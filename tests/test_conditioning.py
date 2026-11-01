@@ -1,4 +1,4 @@
-"""工况调制：`none` / `film` / `adaln` / `adaln_zero` 四种配置的语义、切换与非法值。
+"""工况融合配置语义：已有调制、Fourier 加性编码、条件 token 与条件交叉注意力。
 
 用合成的小批次与小块尺寸，不依赖数据集条目。
 """
@@ -15,7 +15,8 @@ for name in ("app", "baseline", "model"):
 
 from appsolver_v2 import APPSolverV2  # noqa: E402
 from build import build_model  # noqa: E402
-from conditioning import CONDITIONINGS, AdaNorm, FiLM, NoConditioning  # noqa: E402
+from conditioning import (CONDITIONINGS, AdaNorm, ConditionCrossAttention, FiLM,  # noqa: E402
+                          FourierAdd, NoConditioning)
 from encoder import Encoder, EncoderBlock  # noqa: E402
 from query_decoder import DecoderBlock, QueryDecoder  # noqa: E402
 
@@ -188,19 +189,58 @@ class AdaNormSemanticsTest(unittest.TestCase):
                 self.assertIs(seen["kwargs"]["weight"], weight)
                 self.assertIs(seen["kwargs"]["coords_query"], coords_query)
                 self.assertIs(seen["kwargs"]["coords_key"], coords_key)
-                if kind == "none":
+                if kind in {"none", "cond_token", "cond_xattn"}:
                     expected = block.norm_cross(queries)
+                    torch.testing.assert_close(seen["query"], expected)
+                    continue
+                modulation = block.modulation(CONDITION)
+                if kind == "fourier_add":
+                    expected = block.norm_cross(queries + modulation)
+                elif kind == "film":
+                    gamma, beta = modulation
+                    expected = queries * (1.0 + gamma[:, None]) + beta[:, None]
+                    expected = block.norm_cross(expected)
                 else:
-                    modulation = block.modulation(CONDITION)
-                    if kind == "film":
-                        gamma, beta = modulation
-                        expected = queries * (1.0 + gamma[:, None]) + beta[:, None]
-                        expected = block.norm_cross(expected)
-                    else:
-                        shift, scale = modulation[0][:2]
-                        expected = block.norm_cross(queries) * (1.0 + scale[:, None])
-                        expected = expected + shift[:, None]
+                    shift, scale = modulation[0][:2]
+                    expected = block.norm_cross(queries) * (1.0 + scale[:, None])
+                    expected = expected + shift[:, None]
                 torch.testing.assert_close(seen["query"], expected)
+
+
+class AddedConditioningTest(unittest.TestCase):
+    def test_fourier_add_starts_as_identity(self):
+        for block in (EncoderBlock(8, 2, conditioning="fourier_add"),
+                      DecoderBlock(8, 2, conditioning="fourier_add")):
+            modulation = block.modulation(CONDITION)
+            self.assertEqual(tuple(modulation.shape), (BATCH, 1, 8))
+            self.assertEqual(float(modulation.abs().max()), 0.0)
+            self.assertEqual(float(block.modulation.projection.weight.abs().max()), 0.0)
+
+    def test_condition_cross_attention_starts_closed_and_opens_with_gate(self):
+        block = EncoderBlock(8, 2, conditioning="cond_xattn")
+        tokens, weight, coords = block_inputs()
+        plain = EncoderBlock(8, 2, conditioning="none")
+        plain.attention.load_state_dict(block.attention.state_dict())
+        plain.mlp.load_state_dict(block.mlp.state_dict())
+        plain.norm_attention.load_state_dict(block.norm_attention.state_dict())
+        plain.norm_mlp.load_state_dict(block.norm_mlp.state_dict())
+        torch.testing.assert_close(block(tokens, weight, coords, CONDITION),
+                                   plain(tokens, weight, coords, CONDITION))
+        block.condition_cross.gate.data.fill_(0.5)
+        changed = block(tokens, weight, coords, CONDITION)
+        other = block(tokens, weight, coords, CONDITION * 2)
+        self.assertFalse(torch.allclose(changed, other))
+
+    def test_condition_token_is_prepended_with_unit_weight(self):
+        model = build_model(model_config("cond_token"))
+        tokens = torch.randn(BATCH, 5, D_MODEL)
+        weight = torch.rand(BATCH, 5) + 0.1
+        coords = torch.rand(BATCH, 5, 2)
+        combined = model._add_condition_token(tokens, weight, coords, CONDITION)
+        self.assertEqual(tuple(combined[0].shape), (BATCH, 6, D_MODEL))
+        torch.testing.assert_close(combined[1][:, 0], torch.ones(BATCH))
+        torch.testing.assert_close(combined[2][:, 0], torch.zeros(BATCH, 2))
+        torch.testing.assert_close(combined[0][:, 1:], tokens)
 
 
 class NoConditioningTest(unittest.TestCase):
@@ -277,12 +317,18 @@ class ConditioningConfigTest(unittest.TestCase):
                 modules = ([block.modulation for block in model.encoder.blocks]
                            + [block.modulation for block in model.decoder.blocks])
                 expected = {"none": NoConditioning, "film": FiLM,
-                            "adaln": AdaNorm, "adaln_zero": AdaNorm}[kind]
+                            "adaln": AdaNorm, "adaln_zero": AdaNorm,
+                            "fourier_add": FourierAdd, "cond_token": NoConditioning,
+                            "cond_xattn": NoConditioning}[kind]
                 for module in modules:
                     self.assertIsInstance(module, expected)
                 if expected is AdaNorm:
                     self.assertEqual({module.zero_gate for module in modules},
                                      {kind == "adaln_zero"})
+                if kind == "cond_xattn":
+                    for blocks in (model.encoder.blocks, model.decoder.blocks):
+                        for block in blocks:
+                            self.assertIsInstance(block.condition_cross, ConditionCrossAttention)
                 # 逐层独立，不跨层共享参数。
                 self.assertEqual(len({id(module) for module in modules}), len(modules))
 

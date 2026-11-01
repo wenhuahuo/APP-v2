@@ -1,23 +1,22 @@
-"""工况条件调制：`none` / `film` / `adaln` / `adaln_zero` 四种，由配置选择。
+"""工况条件融合：逐层调制、Fourier 加性编码与门控条件交叉注意力。
 
-带条件的三种都从工况向量（`Fr`、`log10 Re`）生成逐层、逐通道的调制参数，参数量只
-与工况维度和 `d_model` 有关，与 token 数、查询点数无关；工况不占 token 位。
-
-- `none`：不使用条件编码。没有任何条件调制参数，block 内只有原来的注意力与 MLP；
-  工况张量只作为批次接口保留，不参与任何计算。
-- `film`：每个 block **入口**做 `x·(1+γ) + β`，随后是原来的注意力与 MLP。
-- `adaln`：DiT 的 adaLN。self/cross-attention 与 MLP 两个残差分支各自在 LayerNorm
-  之后做 `x·(1+scale) + shift` 再进入分支，block 入口不再叠加 FiLM。
-- `adaln_zero`：adaLN 再加逐分支逐通道门控 `α`，残差写成 `x + α ⊙ branch(...)`；
-  调制投影的最后一层零初始化，因此初始 `α = 0`、各残差分支被零门控、block 是恒等路径。
+`none` / `film` / `adaln` / `adaln_zero` 为已有调制路线；`fourier_add` 在每个 block
+入口加入零初始化的工况 Fourier 编码投影；`cond_token` 与 `cond_xattn` 在 block 内
+不做调制，分别由整模型添加上下文 token、由本模块的条件交叉注意力逐层融合。
 
 `adaLN` 与 `adaLN-Zero` 的语义取自 DiT（Peebles & Xie, 2023）：
 `y = x + α₁ ⊙ MSA((1+γ₁)⊙LN(x) + β₁)`，`x = y + α₂ ⊙ MLP((1+γ₂)⊙LN(y) + β₂)`。
+`fourier_add` 参考 DDPM 将时间编码加入每个残差块；`cond_xattn` 使用 Flamingo 式
+零初始化 tanh 门控，使新增条件分支在初始时不改变原网络。
 """
 
+import torch
 import torch.nn as nn
 
-CONDITIONINGS = ("none", "film", "adaln", "adaln_zero")
+from positional import FourierFeatures
+
+CONDITIONINGS = ("none", "film", "adaln", "adaln_zero", "fourier_add",
+                 "cond_token", "cond_xattn")
 
 
 class NoConditioning(nn.Module):
@@ -62,12 +61,46 @@ class AdaNorm(nn.Module):
         return (shift, scale), (shift_mlp, scale_mlp)
 
 
+class FourierAdd(nn.Module):
+    """固定 Fourier 工况编码经零初始化线性投影，逐层加性注入。"""
+
+    def __init__(self, condition_dim, d_model, n_features=16):
+        super().__init__()
+        self.encoding = FourierFeatures(condition_dim, n_features, scale=1.0)
+        self.projection = nn.Linear(2 * n_features, d_model)
+        nn.init.zeros_(self.projection.weight)
+        nn.init.zeros_(self.projection.bias)
+
+    def forward(self, condition):
+        return self.projection(self.encoding(condition))[:, None]
+
+
+class ConditionCrossAttention(nn.Module):
+    """对单个工况嵌入做交叉注意力，以零初始化标量门控接入残差路径。"""
+
+    def __init__(self, condition_dim, d_model, nhead, dropout=0.0):
+        super().__init__()
+        self.condition = nn.Linear(condition_dim, d_model)
+        self.norm = nn.LayerNorm(d_model)
+        self.attention = nn.MultiheadAttention(d_model, nhead, dropout=dropout,
+                                               batch_first=True)
+        self.gate = nn.Parameter(torch.zeros(1))
+
+    def forward(self, tokens, condition):
+        context = self.condition(condition)[:, None]
+        attended = self.attention(self.norm(tokens), context, context,
+                                  need_weights=False)[0]
+        return tokens + torch.tanh(self.gate) * attended
+
+
 def make_conditioning(kind, condition_dim, d_model):
     """按配置名构造调制模块；未知名字直接报错，不做静默回退。"""
-    if kind == "none":
+    if kind in {"none", "cond_token", "cond_xattn"}:
         return NoConditioning()
     if kind == "film":
         return FiLM(condition_dim, d_model)
+    if kind == "fourier_add":
+        return FourierAdd(condition_dim, d_model)
     if kind == "adaln":
         return AdaNorm(condition_dim, d_model)
     if kind == "adaln_zero":

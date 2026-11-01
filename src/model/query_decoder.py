@@ -1,15 +1,13 @@
-"""交叉注意力查询解码器。
+"""交叉注意力查询解码器，查询之间不做自注意力，保持分辨率无关性。
 
-查询点只是输出函数的一种离散化：查询之间不做自注意力，否则某个点的取值会依赖
-同批其它查询点的选取，破坏分辨率无关性。因此解码代价是关于查询点数的线性开销。
-
-工况调制与编码器用同一种配置（none / FiLM / adaLN / adaLN-Zero），作用在查询特征上；
-`none` 不加任何调制，也不引入参数。交叉注意力的 memory、求积权重与坐标语义不变。
+工况融合与编码器使用同一配置。`cond_xattn` 在几何交叉注意力之后增加零门控的
+工况交叉注意力；`fourier_add` 在 block 入口加入工况编码；`cond_token` 只通过
+编码器输出的 memory 融入，不向查询序列添加 token 或查询间注意力。
 """
 
 import torch.nn as nn
 
-from conditioning import gate_residual, make_conditioning, modulate
+from conditioning import ConditionCrossAttention, gate_residual, make_conditioning, modulate
 from positional import FourierFeatures
 from quad_attention import QuadAttention
 
@@ -44,6 +42,8 @@ class DecoderBlock(nn.Module):
         super().__init__()
         self.kind = conditioning
         self.modulation = make_conditioning(conditioning, condition_dim, d_model)
+        self.condition_cross = (ConditionCrossAttention(condition_dim, d_model, nhead, dropout)
+                                if conditioning == "cond_xattn" else None)
         self.norm_cross = nn.LayerNorm(d_model)
         self.cross = QuadAttention(d_model, nhead, rope=rope, dropout=dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
@@ -54,9 +54,13 @@ class DecoderBlock(nn.Module):
         )
 
     def forward(self, queries, tokens, weight, coords_query, coords_key, condition):
-        if self.kind == "none":
+        if self.kind in {"none", "cond_token", "cond_xattn", "fourier_add"}:
+            if self.kind == "fourier_add":
+                queries = queries + self.modulation(condition)
             queries = queries + self.cross(self.norm_cross(queries), tokens, weight=weight,
                                           coords_query=coords_query, coords_key=coords_key)
+            if self.condition_cross is not None:
+                queries = self.condition_cross(queries, condition)
             queries = queries + self.mlp(self.norm_mlp(queries))
             return queries
 
