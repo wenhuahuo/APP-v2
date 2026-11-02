@@ -2,8 +2,11 @@
 
     python3 scripts/train/make_conditioning_ablation_configs.py
 
-验证集为 11 个经典船型的设计 Fr；训练集使用其余 196 条，包含全部融合船型。
+验证集为 11 个经典船型的设计 Fr；训练集使用当前快照的其余条目（含全部融合船型）。
 除数据划分、归一化统计量和 conditioning 外，模型与训练超参沿用 random_seed0。
+
+训练/验证条目数随 `configs/splits_multihull.json` 的全量快照变化，不再写死条目数。
+仓库中已提交的六份配置来自 207 条快照的历史结果，重新运行本脚本会用当前快照覆盖它们。
 """
 
 import json
@@ -15,6 +18,8 @@ CONFIG_DIR = ROOT / "configs" / "appsolver_v2"
 BASE = CONFIG_DIR / "appsolver_v2_flow_with_hull_random_seed0.yaml"
 SPLITS = ROOT / "configs" / "splits_multihull.json"
 METHODS = ("none", "film", "adaln_zero", "fourier_add", "cond_token", "cond_xattn")
+# 经典船型个数是数据契约（`AGENT.md`：11 个经典船型），不随快照条目数变化。
+CLASSIC_HULL_COUNT = 11
 
 
 def bullet_block(text, key, items):
@@ -31,7 +36,7 @@ def lofo_fr_classic_split():
     entries = sorted(splits["random_seed0"]["train"] + splits["random_seed0"]["val"])
     val = [entry for entry in splits["lofo_fr_design"]["val"]
            if not re.search(r"_w\d{3}_fr\d{3}_normal_mesh$", entry)]
-    if len(entries) != 207 or len(val) != 11:
+    if len(val) != CLASSIC_HULL_COUNT or len(entries) <= len(val):
         raise RuntimeError(f"数据快照或经典船型验证集数量异常: {len(entries)} / {len(val)}")
     train = sorted(set(entries) - set(val))
     return train, sorted(val)

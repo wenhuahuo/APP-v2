@@ -1,4 +1,4 @@
-# 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 201 / val 6；其余超参与 gino_multihull_normal.yaml 一致
+# 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 218 / val 6；其余超参与 gino_multihull_normal.yaml 一致
 stats: dataset/shipbench/stats_loto_kvlcc2.json
 model_type: gino
 model:
@@ -64,6 +64,7 @@ train:
   - containership_series60_w075_fr022_normal_mesh
   - containership_wigley_w025_fr024_normal_mesh
   - containership_wigley_w050_fr026_normal_mesh
+  - containership_wigley_w075_fr028_normal_mesh
   - containership_workboat_w025_fr024_normal_mesh
   - containership_workboat_w075_fr028_normal_mesh
   - dtc_fr013_normal_mesh
@@ -84,9 +85,11 @@ train:
   - dtc_npl_round_bilge_4a_w025_fr026_normal_mesh
   - dtc_npl_round_bilge_4a_w050_fr031_normal_mesh
   - dtc_npl_round_bilge_4a_w075_fr035_normal_mesh
+  - dtc_npl_round_bilge_w025_fr026_normal_mesh
   - dtc_npl_round_bilge_w050_fr031_normal_mesh
   - dtc_npl_round_bilge_w075_fr035_normal_mesh
   - dtc_s175_w025_fr023_normal_mesh
+  - dtc_s175_w050_fr025_normal_mesh
   - dtc_s175_w075_fr027_normal_mesh
   - dtc_series60_w025_fr022_normal_mesh
   - dtc_series60_w050_fr022_normal_mesh
@@ -131,14 +134,17 @@ train:
   - kcs_fr042_normal_mesh
   - kcs_fr047_normal_mesh
   - kcs_fr052_normal_mesh
+  - kcs_kvlcc2_w025_fr023_normal_mesh
   - kcs_kvlcc2_w050_fr020_normal_mesh
   - kcs_kvlcc2_w075_fr017_normal_mesh
   - kcs_npl_round_bilge_4a_w025_fr030_normal_mesh
   - kcs_npl_round_bilge_4a_w050_fr033_normal_mesh
   - kcs_npl_round_bilge_4a_w075_fr036_normal_mesh
   - kcs_npl_round_bilge_w025_fr030_normal_mesh
+  - kcs_npl_round_bilge_w050_fr033_normal_mesh
   - kcs_npl_round_bilge_w075_fr036_normal_mesh
   - kcs_s175_w025_fr027_normal_mesh
+  - kcs_s175_w050_fr027_normal_mesh
   - kcs_s175_w075_fr028_normal_mesh
   - kcs_series60_w025_fr025_normal_mesh
   - kcs_series60_w050_fr024_normal_mesh
@@ -149,15 +155,21 @@ train:
   - kcs_workboat_w025_fr027_normal_mesh
   - kcs_workboat_w050_fr028_normal_mesh
   - kcs_workboat_w075_fr029_normal_mesh
+  - kvlcc2_npl_round_bilge_4a_w025_fr021_normal_mesh
   - kvlcc2_npl_round_bilge_4a_w050_fr027_normal_mesh
   - kvlcc2_npl_round_bilge_4a_w075_fr034_normal_mesh
+  - kvlcc2_npl_round_bilge_w025_fr021_normal_mesh
   - kvlcc2_npl_round_bilge_w050_fr027_normal_mesh
   - kvlcc2_npl_round_bilge_w075_fr034_normal_mesh
   - kvlcc2_s175_w025_fr018_normal_mesh
+  - kvlcc2_s175_w050_fr021_normal_mesh
+  - kvlcc2_s175_w075_fr025_normal_mesh
   - kvlcc2_series60_w025_fr016_normal_mesh
+  - kvlcc2_series60_w050_fr018_normal_mesh
   - kvlcc2_series60_w075_fr020_normal_mesh
   - kvlcc2_wigley_w025_fr018_normal_mesh
   - kvlcc2_wigley_w050_fr022_normal_mesh
+  - kvlcc2_wigley_w075_fr026_normal_mesh
   - kvlcc2_workboat_w025_fr018_normal_mesh
   - kvlcc2_workboat_w050_fr022_normal_mesh
   - kvlcc2_workboat_w075_fr026_normal_mesh
@@ -174,6 +186,7 @@ train:
   - npl_round_bilge_4a_series60_w050_fr031_normal_mesh
   - npl_round_bilge_4a_series60_w075_fr026_normal_mesh
   - npl_round_bilge_4a_wigley_w050_fr035_normal_mesh
+  - npl_round_bilge_4a_wigley_w075_fr032_normal_mesh
   - npl_round_bilge_4a_workboat_w025_fr038_normal_mesh
   - npl_round_bilge_4a_workboat_w075_fr032_normal_mesh
   - npl_round_bilge_fr024_normal_mesh
@@ -191,6 +204,8 @@ train:
   - npl_round_bilge_series60_w050_fr031_normal_mesh
   - npl_round_bilge_series60_w075_fr026_normal_mesh
   - npl_round_bilge_wigley_w025_fr038_normal_mesh
+  - npl_round_bilge_wigley_w050_fr035_normal_mesh
+  - npl_round_bilge_wigley_w075_fr032_normal_mesh
   - npl_round_bilge_workboat_w025_fr038_normal_mesh
   - npl_round_bilge_workboat_w050_fr035_normal_mesh
   - npl_round_bilge_workboat_w075_fr032_normal_mesh
@@ -201,8 +216,10 @@ train:
   - s175_fr040_normal_mesh
   - s175_fr046_normal_mesh
   - s175_series60_w050_fr025_normal_mesh
+  - s175_series60_w075_fr024_normal_mesh
   - s175_wigley_w025_fr029_normal_mesh
   - s175_wigley_w050_fr029_normal_mesh
+  - s175_wigley_w075_fr030_normal_mesh
   - s175_workboat_w025_fr029_normal_mesh
   - s175_workboat_w050_fr029_normal_mesh
   - s175_workboat_w075_fr030_normal_mesh
