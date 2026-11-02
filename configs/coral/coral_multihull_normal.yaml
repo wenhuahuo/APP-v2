@@ -1,0 +1,47 @@
+# CORAL：4 船型训练 / 2 船型验证的多船型数据集（normal 网格），主实验统一口径
+# 输入自由液面 + 船体表面、仅流场输出、逐层 FiLM 工况融合、lambda_hull=0.0
+stats: dataset/shipbench/stats.json
+model_type: coral
+model:
+  input_domains:
+  - flow
+  - hull
+  output_domains:
+  - flow
+  d_model: 176
+  nhead: 8
+  encoder_layers: 2
+  latents: 64
+  mlp_ratio: 4
+  siren_hidden: 176
+  siren_layers: 4
+  w0: 30.0
+  w0_initial: 30.0
+  modulate_shift: true
+  modulate_scale: false
+  modulation_hidden: 176
+  modulation_layers: 2
+  conditioning: film
+  dropout: 0.0
+train:
+  device: cuda
+  dataset_root: dataset/shipbench
+  entries:
+  - kcs_fr026_normal_mesh
+  - dtc_fr022_normal_mesh
+  - series60_fr022_normal_mesh
+  - containership_fr022_normal_mesh
+  train_strides:
+  - 1
+  - 2
+  epochs: 100
+  steps_per_epoch: 48
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_queries: 4096
+  val_queries: 16384
+  lambda_hull: 0.0
+  seed: 0
+  val_entries:
+  - s175_fr029_normal_mesh
+  - kvlcc2_fr014_normal_mesh
