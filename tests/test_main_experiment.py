@@ -1,10 +1,18 @@
 """主实验公平配置：9 个模型在同一任务口径下的配置与模型行为。
 
+主实验范围是 `random_seed0` 随机划分：9 个模型 × 2 种容量口径（固定参数量
+`_multihull_normal`、固定计算量 `_multihull_isoflops`）= 18 份配置。留一船型与留一
+设计 Fr 的配置由同一生成器派生、保留给后续泛化实验，本轮主实验不训练它们。
+
 判别点：
 
-- 三个主表划分（随机 15%、留一船型 kvlcc2、留一设计 Fr）下 9 个模型的 `stats`、
-  训练/验证条目和训练超参完全一致，只有模型自身结构不同；
-- 每个主表配置都真实生效：模型只输出流场、不构造船面输出头、船体几何与工况都改变
+- 主表 18 份配置的 `stats`、训练/验证条目和训练超参完全一致，同一容量口径下只有模型
+  自身结构不同；
+- 派生配置由 `make_split_configs.py` 按划分定义确定性生成：只替换 `stats`、
+  `train.entries`、`train.val_entries` 与头注释，容量超参与基础配置逐项相同（三个划分
+  × 两种容量共 54 份都走同一条生成路径，含保留的泛化实验配置）；
+- 全部配置共用单一种子 `seed=0`；
+- 主表配置都真实生效：模型只输出流场、不构造船面输出头、船体几何与工况都改变
   流场预测、损失只含流场项（`lambda_hull=0.0` 且模型没有 hull 输出域）；
 - 历史 KCS / 消融配置不被默认值静默改写：仍保留双域输出与 `lambda_hull=1.0`。
 """
@@ -20,25 +28,41 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 for name in ("datapipe", "app", "baseline", "model", "train", "eval"):
     sys.path.insert(0, str(ROOT / "src" / name))
+sys.path.insert(0, str(ROOT / "scripts" / "train"))
 
 from build import build_model  # noqa: E402
 from collate import collate_samples  # noqa: E402
 from normalize import Normalizer  # noqa: E402
 from trainer import Trainer  # noqa: E402
+import make_split_configs  # noqa: E402
 
 CONFIG_DIR = ROOT / "configs"
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
           "transolver", "oformer", "gino", "coral")
-SPLITS = ("random_seed0", "loto_kvlcc2", "lofo_fr_design")
+# 主实验只跑随机划分；留一船型和留一设计 Fr 的配置保留给后续泛化实验
+MAIN_SPLIT = "random_seed0"
+RETAINED_SPLITS = ("loto_kvlcc2", "lofo_fr_design")
+SPLITS = (MAIN_SPLIT,) + RETAINED_SPLITS
+# 容量口径：目录里固定的基础配置后缀 -> 该口径派生配置的附加后缀
+CAPACITIES = (("_multihull_normal", ""), ("_multihull_isoflops", "_isoflops"))
+SBATCH = ROOT / "scripts" / "train" / "train_main_experiment.sbatch"
 SHARED_TRAIN_KEYS = ("epochs", "steps_per_epoch", "learning_rate", "weight_decay",
                      "batch_queries", "val_queries", "train_strides", "seed", "lambda_hull",
                      "device", "dataset_root")
+SPLIT_KEYS = ("entries", "val_entries")
 NX, NY = 17, 9
 HULL_POINTS = 40
 
 
-def load(model, split):
-    return yaml.safe_load((CONFIG_DIR / model / f"{model}_{split}.yaml").read_text())
+def load(model, split, capacity_suffix=""):
+    return yaml.safe_load((CONFIG_DIR / model /
+                           f"{model}_{split}{capacity_suffix}.yaml").read_text())
+
+
+def splits_definition():
+    return {key: value for key, value
+            in json.loads((CONFIG_DIR / "splits_multihull.json").read_text()).items()
+            if not key.startswith("_")}
 
 
 def synthetic_sample():
@@ -82,19 +106,30 @@ def perturbed(batch, key, value):
 
 
 class MainConfigTest(unittest.TestCase):
-    def test_every_model_has_the_three_main_splits(self):
-        for split in SPLITS:
+    def test_main_table_is_nine_models_in_two_capacities(self):
+        """主表恰好 18 份配置：9 模型 × 固定参数量 / 固定计算量，划分都是 random_seed0。"""
+        for _, capacity_suffix in CAPACITIES:
             for model in MODELS:
-                with self.subTest(split=split, model=model):
-                    config = load(model, split)
+                with self.subTest(model=model, capacity=capacity_suffix):
+                    config = load(model, MAIN_SPLIT, capacity_suffix)
                     self.assertEqual(config["model_type"], model)
+                    self.assertEqual(config["stats"],
+                                     f"dataset/shipbench/stats_{MAIN_SPLIT}.json")
 
-    def test_splits_share_data_statistics_and_training_budget(self):
-        for split in SPLITS:
-            reference = load(MODELS[0], split)
+    def test_retained_split_configs_still_exist(self):
+        """留一船型 / 留一设计 Fr 的配置保留给后续泛化实验，不参与本轮主实验。"""
+        for _, capacity_suffix in CAPACITIES:
+            for split in RETAINED_SPLITS:
+                for model in MODELS:
+                    with self.subTest(split=split, model=model, capacity=capacity_suffix):
+                        self.assertEqual(load(model, split, capacity_suffix)["model_type"], model)
+
+    def test_main_table_shares_data_statistics_and_training_budget(self):
+        for _, capacity_suffix in CAPACITIES:
+            reference = load(MODELS[0], MAIN_SPLIT, capacity_suffix)
             for model in MODELS[1:]:
-                with self.subTest(split=split, model=model):
-                    config = load(model, split)
+                with self.subTest(model=model, capacity=capacity_suffix):
+                    config = load(model, MAIN_SPLIT, capacity_suffix)
                     self.assertEqual(config["stats"], reference["stats"])
                     self.assertEqual(config["train"]["entries"],
                                      reference["train"]["entries"])
@@ -104,25 +139,72 @@ class MainConfigTest(unittest.TestCase):
                         self.assertEqual(config["train"][key], reference["train"][key], key)
 
     def test_entries_match_the_shared_split_file(self):
-        splits = {key: value for key, value
-                  in json.loads((CONFIG_DIR / "splits_multihull.json").read_text()).items()
-                  if not key.startswith("_")}
-        for split, definition in splits.items():
-            config = load(MODELS[0], split)
-            self.assertEqual(config["train"]["entries"], definition["train"])
-            self.assertEqual(config["train"]["val_entries"], definition["val"])
-            self.assertEqual(config["stats"],
-                             f"dataset/shipbench/stats_{split}.json")
+        for split, definition in splits_definition().items():
+            self.assertIn(split, SPLITS)
+            for _, capacity_suffix in CAPACITIES:
+                config = load(MODELS[0], split, capacity_suffix)
+                with self.subTest(split=split, capacity=capacity_suffix):
+                    self.assertEqual(config["train"]["entries"], definition["train"])
+                    self.assertEqual(config["train"]["val_entries"], definition["val"])
+                    self.assertEqual(config["stats"],
+                                     f"dataset/shipbench/stats_{split}.json")
+
+    def test_single_seed_zero_for_every_config(self):
+        for _, capacity_suffix in CAPACITIES:
+            for split in SPLITS:
+                for model in MODELS:
+                    with self.subTest(split=split, model=model, capacity=capacity_suffix):
+                        self.assertEqual(load(model, split, capacity_suffix)["train"]["seed"], 0)
+
+    def test_committed_configs_match_the_generator(self):
+        """派生幂等：重新生成必须逐字节等于提交的 54 份配置。"""
+        for base_suffix, capacity_suffix in CAPACITIES:
+            for model in MODELS:
+                base = CONFIG_DIR / model / f"{model}{base_suffix}.yaml"
+                for split, definition in splits_definition().items():
+                    with self.subTest(split=split, model=model, capacity=capacity_suffix):
+                        expected = make_split_configs.derive(base, split, definition)
+                        committed = (CONFIG_DIR / model /
+                                     make_split_configs.output_name(base, split)).read_text()
+                        self.assertEqual(committed, expected)
+
+    def test_derived_configs_only_change_split_fields(self):
+        """容量与模型超参来自基础配置：派生配置除 stats/条目/头注释外逐项相同。"""
+        for base_suffix, capacity_suffix in CAPACITIES:
+            for model in MODELS:
+                base = yaml.safe_load(
+                    (CONFIG_DIR / model / f"{model}{base_suffix}.yaml").read_text())
+                for split in SPLITS:
+                    derived = load(model, split, capacity_suffix)
+                    definition = splits_definition()[split]
+                    with self.subTest(split=split, model=model, capacity=capacity_suffix):
+                        self.assertEqual(derived["train"]["entries"], definition["train"])
+                        self.assertEqual(derived["train"]["val_entries"], definition["val"])
+                        for key in ("model", "eval"):
+                            self.assertEqual(derived.get(key), base.get(key))
+                        for key, value in base["train"].items():
+                            if key in SPLIT_KEYS:
+                                continue
+                            self.assertEqual(derived["train"][key], value, key)
 
     def test_task_protocol_is_unified(self):
-        for split in SPLITS:
+        for _, capacity_suffix in CAPACITIES:
             for model in MODELS:
-                with self.subTest(split=split, model=model):
-                    model_config = load(model, split)["model"]
-                    self.assertEqual(model_config["output_domains"], ["flow"])
-                    self.assertEqual(model_config["conditioning"], "film")
-                    self.assertIn("hull", model_config["input_domains"])
-                    self.assertEqual(load(model, split)["train"]["lambda_hull"], 0.0)
+                with self.subTest(model=model, capacity=capacity_suffix):
+                    config = load(model, MAIN_SPLIT, capacity_suffix)
+                    self.assertEqual(config["model"]["output_domains"], ["flow"])
+                    self.assertEqual(config["model"]["conditioning"], "film")
+                    self.assertIn("hull", config["model"]["input_domains"])
+                    self.assertEqual(config["train"]["lambda_hull"], 0.0)
+
+    def test_sbatch_covers_exactly_the_main_table(self):
+        """数组任务与主表一一对应：9 个元素、random_seed0、两种容量由 CAPACITY 选择。"""
+        text = SBATCH.read_text()
+        self.assertIn("--array=0-8%1", text)
+        self.assertIn(f'SPLIT="{MAIN_SPLIT}"', text)
+        self.assertIn("CAPACITY_SUFFIX=\"_isoflops\"", text)
+        models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
+        self.assertEqual(tuple(models_block.split()), MODELS)
 
     def test_historical_configs_keep_legacy_semantics(self):
         """KCS 与消融配置保留双域输出与 lambda_hull=1.0，不被默认值改写。"""

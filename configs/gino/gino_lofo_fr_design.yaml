@@ -1,4 +1,4 @@
-# 划分 lofo_fr_design（leave_one_fr_scale_out，留出 fr_scale=1.0（设计 Fr））：train 55 / val 169；其余超参与 gino_multihull_normal.yaml 一致
+# 划分 lofo_fr_design（leave_one_fr_scale_out，留出 fr_scale=1.0（设计 Fr））：train 55 / val 169；固定参数量容量，其余超参与 gino_multihull_normal.yaml 一致
 stats: dataset/shipbench/stats_lofo_fr_design.json
 model_type: gino
 model:

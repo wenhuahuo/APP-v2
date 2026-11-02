@@ -1,4 +1,4 @@
-# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 190 / val 34；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
+# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 190 / val 34；固定参数量容量，其余超参与 appsolver_oformer_multihull_normal.yaml 一致
 stats: dataset/shipbench/stats_random_seed0.json
 model_type: appsolver_oformer
 model:

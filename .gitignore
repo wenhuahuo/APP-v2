@@ -2,6 +2,7 @@
 /dataset/
 /output/
 logs/
+/archive/
 *.vtu
 *.vtp
 *.npy

@@ -1,4 +1,4 @@
-# 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 218 / val 6；其余超参与 appsolver_oformer_multihull_normal.yaml 一致
+# 划分 loto_kvlcc2（leave_one_hull_out，留出 kvlcc2）：train 218 / val 6；固定参数量容量，其余超参与 appsolver_oformer_multihull_normal.yaml 一致
 stats: dataset/shipbench/stats_loto_kvlcc2.json
 model_type: appsolver_oformer
 model:
