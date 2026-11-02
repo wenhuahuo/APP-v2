@@ -1,4 +1,4 @@
-# appsolver_v1：等计算量（iso-FLOPs）对照，前向 214.8 GFLOPs、47.883 M 参数
+# appsolver_v1：等计算量（iso-FLOPs）对照，前向 214.8 GFLOPs、49.366 M 参数
 # 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、
 # lambda_hull=0.0
 # 与 appsolver_v1_multihull_normal.yaml 的唯一差别是主干容量
@@ -17,7 +17,7 @@ model:
   nhead: 4
   layers: 2
   mlp_ratio: 4
-  max_patches: 2048
+  max_patches: 4096
   dropout: 0.0
 train:
   device: cuda

@@ -14,7 +14,7 @@ model:
   nhead: 4
   layers: 2
   mlp_ratio: 4
-  max_patches: 2048
+  max_patches: 4096
   dropout: 0.0
 train:
   device: cuda
