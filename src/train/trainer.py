@@ -16,6 +16,7 @@ import torch
 
 from collate import collate_samples
 from losses import appsolver_loss
+from seeding import set_seed
 from ship_dataset import ShipDataset
 
 VALIDATION_INTERVAL = 5
@@ -32,6 +33,9 @@ class Trainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         config = self.config
+        # 全局 RNG 由 `train.seed` 固定：模型已在 train_model.py 里按同一种子初始化，
+        # 这里再固定一次，保证查询点采样与调用方是否预先设种子无关。
+        self.seed = set_seed(config["seed"])
         self.device = torch.device(config["device"])
         self.model.to(self.device)
         self.datasets = {stride: ShipDataset(config["dataset_root"], config["entries"],
@@ -40,13 +44,13 @@ class Trainer:
         self.validation = {stride: ShipDataset(config["dataset_root"], config["val_entries"],
                                                stride=stride)
                            for stride in config["train_strides"]}
-        self.generator = torch.Generator().manual_seed(config["seed"])
+        self.generator = torch.Generator().manual_seed(self.seed)
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=config["learning_rate"],
             weight_decay=config["weight_decay"])
         validation = self.validation[config["train_strides"][0]]
         self.val_queries = (self._sample_queries(
-            config["val_queries"], torch.Generator().manual_seed(config["seed"]), validation)
+            config["val_queries"], torch.Generator().manual_seed(self.seed), validation)
             if "flow" in self.domains else None)
 
     @staticmethod

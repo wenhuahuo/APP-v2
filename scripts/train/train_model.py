@@ -16,6 +16,7 @@ for name in ("datapipe", "app", "baseline", "model", "train"):
 
 from build import build_model  # noqa: E402
 from normalize import Normalizer  # noqa: E402
+from seeding import set_seed  # noqa: E402
 from trainer import Trainer  # noqa: E402
 
 
@@ -26,13 +27,16 @@ def main():
 
     config_path = Path(args.config)
     config = yaml.safe_load(config_path.read_text())
+    # 种子必须在构造模型之前固定，权重初始化才可复现；Trainer 会再固定一次查询采样。
+    seed = set_seed(config["train"]["seed"])
     model = build_model(config)
     normalizer = Normalizer.load(ROOT / config["stats"])
 
     trainer = Trainer(model, normalizer, config, ROOT / "output" / config_path.stem)
     parameters = sum(p.numel() for p in model.parameters())
     print(f"{config_path.stem}: {config['model_type']} {parameters / 1e6:.3f} M 参数，"
-          f"条目 {config['train']['entries']}")
+          f"seed {seed}，训练条目 {len(config['train']['entries'])}，"
+          f"验证条目 {len(config['train']['val_entries'])}")
     trainer.run()
 
 
