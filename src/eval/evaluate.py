@@ -39,7 +39,7 @@ def predict_entry(model, normalizer, sample, device, chunk=CHUNK):
             queries = coords[part]
             output = model(batch, queries[None].to(device))
             prediction.append(output["flow"][0].cpu())
-            if "hull" in domains:
+            if "hull" in domains and hull_prediction is None:
                 hull_prediction = output["hull"][0][:, 0].cpu()
         flow_prediction = torch.cat(prediction)
     elif "hull" in domains:
