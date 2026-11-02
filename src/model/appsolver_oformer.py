@@ -15,6 +15,8 @@ from tokenizer import flow_tokens, hull_tokens
 
 
 class APPSolverOFormer(nn.Module):
+    supports_query_decoder = True
+
     def __init__(self, flow_size_tiers, hull_size, d_model=128, nhead=8, encoder_layers=2,
                  decoder_layers=2, mlp_ratio=4.0, propagator_layers=3, fourier_scale=8.0,
                  rotary_min_freq=0.25, rotary_scale=16.0, dropout=0.0, condition_dim=2,

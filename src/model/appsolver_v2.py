@@ -23,6 +23,10 @@ HULL_FEATURES = ("u", "v", "x", "y", "z", "nx", "ny", "nz")
 
 
 class APPSolverV2(nn.Module):
+    """`supports_query_decoder`: 解码器只依赖查询坐标，可以固定输入密度、独立查询。"""
+
+    supports_query_decoder = True
+
     def __init__(self, flow_size_tiers, hull_size, d_model=64, nhead=4,
                  encoder_layers=2, decoder_layers=2, mlp_ratio=4.0, dropout=0.0,
                  positional="fourier", query_basis="siren", fourier_features=16,

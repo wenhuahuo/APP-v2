@@ -1,7 +1,9 @@
 """按配置在若干查询密度上评测模型，写逐通道指标。
 
 预测与真值都换算回物理量（波高 m、速度 m/s、液面与船面 Cp）；`stride` 依次给查询
-点集密度，训练用过的档位是直接评估，其余是跨分辨率评估。指标写
+点集密度，训练用过的档位是直接评估，其余是跨分辨率评估。配置里的
+`eval.encode_stride`（或命令行 `--encode-stride`）把输入点云密度固定在某一档，查询
+密度仍逐档变化，用于「固定输入编码、只改查询密度」的协议。指标写
 `output/<配置文件名>/metrics.json`；控制台只按划分与 `stride` 汇总条目（mean±std），
 每个划分两张表：R²↑ 与 RMSE↓。
 
@@ -35,6 +37,8 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--strides", type=int, nargs="+", default=list(STRIDES))
     parser.add_argument("--checkpoint", default="best.pt", help="best.pt 或 last.pt")
+    parser.add_argument("--encode-stride", type=int, default=None,
+                        help="固定输入点云密度（缺省用配置的 eval.encode_stride）")
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -48,6 +52,8 @@ def main():
     normalizer = Normalizer.load(ROOT / config["stats"])
 
     train = config["train"]
+    encode_stride = (args.encode_stride if args.encode_stride is not None
+                     else config.get("eval", {}).get("encode_stride"))
     splits = {"train": train["entries"], "val": train["val_entries"]}
     results = {
         "config": str(config_path),
@@ -56,9 +62,10 @@ def main():
         "checkpoint": args.checkpoint,
         "checkpoint_epoch": checkpoint["epoch"],
         "train_strides": list(train["train_strides"]),
+        "encode_stride": encode_stride,
         "tasks": splits,
         "strides": {split: density_sweep(model, normalizer, ROOT / train["dataset_root"],
-                                         entries, args.strides, device, CHUNK)
+                                         entries, args.strides, device, CHUNK, encode_stride)
                     for split, entries in splits.items()},
     }
 

@@ -199,6 +199,8 @@ class GaussianFourierFeatures(nn.Module):
 
 
 class OFormerBaseline(nn.Module):
+    supports_query_decoder = True
+
     def __init__(self, d_model=128, nhead=8, encoder_layers=2, decoder_layers=2,
                  mlp_ratio=4.0, propagator_layers=2, fourier_scale=8.0,
                  rotary_min_freq=0.25, rotary_scale=16.0, dropout=0.0, condition_dim=2,
