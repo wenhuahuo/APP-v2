@@ -1,0 +1,50 @@
+# coral：等计算量（iso-FLOPs）对照，前向 211.8 GFLOPs、2.797 M 参数
+# 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、
+# lambda_hull=0.0
+# 与 coral_multihull_normal.yaml 的唯一差别是主干容量
+# （siren_hidden 176 → 432、modulation_hidden 176 → 432），分词/潜网格与训练协议不变
+stats: dataset/shipbench/stats.json
+model_type: coral
+model:
+  input_domains:
+  - flow
+  - hull
+  output_domains:
+  - flow
+  d_model: 176
+  nhead: 8
+  encoder_layers: 2
+  latents: 128
+  mlp_ratio: 4
+  siren_hidden: 432
+  siren_layers: 6
+  w0: 30.0
+  w0_initial: 30.0
+  modulate_shift: true
+  modulate_scale: false
+  modulation_hidden: 432
+  modulation_layers: 2
+  conditioning: film
+  dropout: 0.0
+train:
+  device: cuda
+  dataset_root: dataset/shipbench
+  entries:
+  - kcs_fr026_normal_mesh
+  - dtc_fr022_normal_mesh
+  - series60_fr022_normal_mesh
+  - containership_fr022_normal_mesh
+  train_strides:
+  - 1
+  - 2
+  epochs: 100
+  steps_per_epoch: 48
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  batch_queries: 4096
+  val_queries: 16384
+  lambda_hull: 0.0
+  seed: 0
+  val_entries:
+  - s175_fr029_normal_mesh
+  - kvlcc2_fr014_normal_mesh
