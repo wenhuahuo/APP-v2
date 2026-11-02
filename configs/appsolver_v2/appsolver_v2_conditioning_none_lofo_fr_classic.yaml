@@ -1,9 +1,8 @@
-# 工况融合消融 cond_xattn：lofo_fr_classic，train 196 / val 11；双域输入、仅流场监督；其余超参与主实验一致
-# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 176 / val 31；其余超参与 appsolver_v2_multihull_normal.yaml 一致
+# 工况融合消融 none：lofo_fr_classic，train 196 / val 11；双域输入、仅流场监督；其余超参与主实验一致
 stats: dataset/shipbench/stats_lofo_fr_classic.json
 model_type: appsolver_v2
 model:
-  conditioning: cond_xattn
+  conditioning: none
   input_domains:
   - flow
   - hull

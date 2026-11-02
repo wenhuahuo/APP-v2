@@ -1,9 +1,15 @@
-# appsolver_v2：等计算量（iso-FLOPs）对照，前向 248.0 GFLOPs、1.240 M 参数
-# KCS 单船型 6 个 Fr，训练 kcs_fr026/031/036/047/052_normal_mesh，验证 kcs_fr042（Fr=0.416）
-# 与 appsolver_v2_kcs_fr_sweep 的唯一差别是容量超参（对齐到 APP 主线的 248 G）与 50 epoch
+# APP 主线（APP 分词 + 自建主干）：KCS 单船型 6 个 Fr 的 normal 网格条目，留一 Fr 验证（Fr=0.416）
+# 训练集 kcs_fr026/031/036/047/052_normal_mesh（Fr 0.260 / 0.312 / 0.364 / 0.468 / 0.520）
+# 验证集 kcs_fr042_normal_mesh（Fr=0.416，落在训练 Fr 范围内的内插工况）
 stats: dataset/shipbench/stats_kcs_fr_sweep.json
 model_type: appsolver_v2
 model:
+  input_domains:
+  - flow
+  - hull
+  output_domains:
+  - flow
+  - hull
   flow_size_tiers:
   - - 0.05
     - 0.02
@@ -33,7 +39,7 @@ train:
   train_strides:
   - 1
   - 2
-  epochs: 50
+  epochs: 100
   steps_per_epoch: 48
   learning_rate: 0.001
   weight_decay: 0.0001

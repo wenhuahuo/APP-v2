@@ -11,9 +11,9 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG_DIR = ROOT / "configs"
-BASE = CONFIG_DIR / "appsolver_v2_random_seed0.yaml"
-SPLITS = CONFIG_DIR / "splits_multihull.json"
+CONFIG_DIR = ROOT / "configs" / "appsolver_v2"
+BASE = CONFIG_DIR / "appsolver_v2_flow_with_hull_random_seed0.yaml"
+SPLITS = ROOT / "configs" / "splits_multihull.json"
 METHODS = ("none", "film", "adaln_zero", "fourier_add", "cond_token", "cond_xattn")
 
 
@@ -39,11 +39,9 @@ def lofo_fr_classic_split():
 
 def main():
     train, val = lofo_fr_classic_split()
-    base = BASE.read_text()
+    base = "".join(line for line in BASE.read_text().splitlines(keepends=True)
+                   if not line.startswith("#"))
     base = base.replace("stats_random_seed0.json", "stats_lofo_fr_classic.json", 1)
-    base = base.replace("model:\n", "model:\n  input_domains:\n  - flow\n  - hull\n"
-                        "  output_domains:\n  - flow\n", 1)
-    base = base.replace("  lambda_hull: 1.0\n", "  lambda_hull: 0.0\n", 1)
     base = bullet_block(base, "entries", train)
     base = bullet_block(base, "val_entries", val)
     base = re.sub(r"^  conditioning: .*\n", "", base, count=1, flags=re.M)

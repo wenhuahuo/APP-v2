@@ -31,7 +31,7 @@ def replace_block(text, key, items):
 def main():
     splits = {k: v for k, v in json.loads((CONFIG_DIR / "splits_multihull.json").read_text()).items()
               if not k.startswith("_")}
-    bases = sorted(CONFIG_DIR.glob(f"*{BASE_SUFFIX}.yaml"))
+    bases = sorted(CONFIG_DIR.glob(f"*/*{BASE_SUFFIX}.yaml"))
     if len(bases) != 7:
         raise RuntimeError(f"期望 7 个基础配置，实际 {len(bases)}")
     for base in bases:
@@ -48,7 +48,7 @@ def main():
             header = (f"# 划分 {name}（{split['protocol']}，留出 {split['holdout']}）："
                       f"train {len(split['train'])} / val {len(split['val'])}；"
                       f"其余超参与 {base.name} 一致\n")
-            out = CONFIG_DIR / f"{model}_{name}.yaml"
+            out = base.parent / f"{model}_{name}.yaml"
             out.write_text(header + derived)
             print(f"{out.name}: train {len(split['train'])} / val {len(split['val'])}")
 

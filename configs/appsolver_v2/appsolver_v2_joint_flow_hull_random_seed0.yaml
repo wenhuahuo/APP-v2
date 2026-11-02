@@ -1,5 +1,4 @@
-# 船体融合机制消融 joint_flow_hull：random_seed0 划分；仅改输入域和输出域，其余训练超参不变
-# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 176 / val 31；其余超参与 appsolver_v2_multihull_normal.yaml 一致
+# 船体融合机制消融 joint_flow_hull：random_seed0 划分；按变体设置输入域、输出域和船面损失权重，其余训练超参不变
 stats: dataset/shipbench/stats_random_seed0.json
 model_type: appsolver_v2
 model:

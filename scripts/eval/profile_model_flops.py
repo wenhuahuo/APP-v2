@@ -7,7 +7,7 @@
 
 用法:
     python3 scripts/eval/profile_model_flops.py
-    python3 scripts/eval/profile_model_flops.py --configs configs/appsolver_v2_kcs_fr_sweep.yaml
+    python3 scripts/eval/profile_model_flops.py --configs configs/appsolver_v2/appsolver_v2_kcs_fr_sweep.yaml
 """
 
 import argparse
@@ -27,16 +27,16 @@ from build import build_model  # noqa: E402
 from collate import collate_samples  # noqa: E402
 from normalize import Normalizer  # noqa: E402
 from ship_dataset import ShipDataset  # noqa: E402
-from tokenizer import flow_tokens  # noqa: E402
+from tokenizer import flow_tokens, hull_tokens  # noqa: E402
 
 DEFAULT_CONFIGS = (
-    "configs/appsolver_v2_kcs_fr_sweep.yaml",
-    "configs/oformer_kcs_fr_sweep.yaml",
-    "configs/gnot_kcs_fr_sweep.yaml",
-    "configs/upt_kcs_fr_sweep.yaml",
-    "configs/transolver_kcs_fr_sweep.yaml",
-    "configs/appsolver_oformer_kcs_fr_sweep.yaml",
-    "configs/appsolver_v1_kcs_fr_sweep.yaml",
+    "configs/appsolver_v2/appsolver_v2_kcs_fr_sweep.yaml",
+    "configs/oformer/oformer_kcs_fr_sweep.yaml",
+    "configs/gnot/gnot_kcs_fr_sweep.yaml",
+    "configs/upt/upt_kcs_fr_sweep.yaml",
+    "configs/transolver/transolver_kcs_fr_sweep.yaml",
+    "configs/appsolver_oformer/appsolver_oformer_kcs_fr_sweep.yaml",
+    "configs/appsolver_v1/appsolver_v1_kcs_fr_sweep.yaml",
 )
 
 
@@ -64,15 +64,23 @@ def profile(config_path, dataset, entry, device):
 
 
 def app_tokens(config_path, dataset, entry):
-    """APP 类模型的 patch token 数（两域合计）；非 APP 模型返回 None。"""
+    """按实际分词方法统计 APP 模型的流场与船体 token 总数。"""
     config = yaml.safe_load(Path(config_path).read_text())
-    if "flow_size_tiers" not in config["model"]:
+    model = config["model"]
+    if "flow_size_tiers" not in model:
         return None
     sample = ShipDataset(dataset, [entry], stride=1)[0]
     batch = collate_samples([sample])
-    flow = flow_tokens(batch, 0, config["model"]["flow_size_tiers"],
-                       config["model"].get("max_level", 12))
-    return len(flow[0])
+    method = model.get("flow_tokenizer", "adaptive")
+    if method == "learned":
+        count = model.get("flow_learned_tokens", 512)
+    else:
+        tiers = (model["flow_size_tiers"] if method == "adaptive"
+                 else [[None, model.get("flow_uniform_size", 0.1)]])
+        count = len(flow_tokens(batch, 0, tiers, model.get("max_level", 12))[0])
+    if "hull" in model.get("input_domains", ("flow", "hull")):
+        count += len(hull_tokens(batch, 0, model["hull_size"], model.get("max_level", 12))[0])
+    return count
 
 
 def main():

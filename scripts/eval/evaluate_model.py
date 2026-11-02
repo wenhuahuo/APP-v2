@@ -6,7 +6,7 @@
 每个划分两张表：R²↑ 与 RMSE↓。
 
 用法:
-    python3 scripts/eval/evaluate_model.py --config configs/appsolver_v2_kcs_normal_wide.yaml
+    python3 scripts/eval/evaluate_model.py --config configs/appsolver_v2/appsolver_v2_kcs_normal_wide.yaml
 """
 
 import argparse
