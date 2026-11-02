@@ -83,6 +83,7 @@ configs/
 - `TODO.md`：正式实验计划
 - `docs/paper/paper_outline.md`：论文贡献与实验大纲
 - `docs/main_experiment_protocol.md`：主实验统一口径、基线实现依据与跨分辨率评测
+- `docs/isoflops_model_complexity.md`：固定 GFLOPs 下的参数量、token 量与计算量对照
 - `docs/three_split_evaluation.md`：多模型与多划分结果
 - `docs/framework_ablation.md`：船体融合机制消融
 - `docs/partition_ablation.md`：Patch 分词消融
