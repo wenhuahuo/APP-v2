@@ -76,17 +76,23 @@ class APPSolverOFormer(nn.Module):
         return flow, hull
 
     def _joint(self, flow, hull):
-        """两域 patch token 各自投影 + 域标识后拼接，流场 token 在前。"""
-        tokens = torch.cat([self.flow_input(flow[0]) + self.domain.weight[0],
-                            self.hull_input(hull[0]) + self.domain.weight[1]])
-        return tokens, torch.cat([flow[2], hull[2]])
+        """两域 patch token 各自投影 + 域标识后拼接，流场 token 在前。
+
+        逗号分词在 CPU 上完成（几何分区不参与梯度），投影前必须搬回参数所在设备；
+        形心同样要跟着搬，否则位置编码会与 latents 设备不一致。
+        """
+        device = self.flow_input.weight.device
+        tokens = torch.cat([self.flow_input(flow[0].to(device)) + self.domain.weight[0],
+                            self.hull_input(hull[0].to(device)) + self.domain.weight[1]])
+        return tokens, torch.cat([flow[2], hull[2]]).to(device)
 
     def forward(self, batch, flow_queries):
         """批大小固定为 1；流场在任意查询点上取值，船面取整条湿表面。"""
         condition = batch["condition"]
         bias = self.condition(condition) if self.condition is not None else 0.0
         flow, hull = self._patches(batch)
-        hull_query = batch["hull_uv"][0][batch["hull_mask"][0]].to(flow[0].device)[None]
+        hull_query = batch["hull_uv"][0][batch["hull_mask"][0]].to(
+            self.flow_input.weight.device)[None]
         output = {}
         if self.joint:
             tokens, centres = self._joint(flow, hull)

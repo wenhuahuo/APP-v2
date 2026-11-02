@@ -224,6 +224,25 @@ class MainConfigTest(unittest.TestCase):
         self.assertEqual(joint["train"]["lambda_hull"], 1.0)
 
 
+@unittest.skipUnless(torch.cuda.is_available(), "需要 CUDA 才能校验 CPU 分词 → GPU 模型的搬运")
+class CudaForwardTest(unittest.TestCase):
+    """9 个主实验模型在 GPU 上跑通：分词在 CPU 完成，参数与形心必须搬到模型所在设备。"""
+
+    def test_all_main_models_forward_on_cuda(self):
+        sample = synthetic_sample()
+        batch = {key: value.cuda() for key, value in collate_samples([sample]).items()}
+        queries = queries_from(batch)
+        for model in MODELS:
+            with self.subTest(model=model):
+                module = build_model(load(model, MAIN_SPLIT)).cuda().eval()
+                with torch.no_grad():
+                    output = module(batch, queries)
+                self.assertEqual(tuple(output["flow"].shape), (1, 7, 5))
+                self.assertEqual(output["flow"].device.type, "cuda")
+                del module
+                torch.cuda.empty_cache()
+
+
 class UnifiedForwardTest(unittest.TestCase):
     """用主表配置构造模型，验证任务口径在代码里真实生效（不只是 YAML 字段）。"""
 
