@@ -3,13 +3,18 @@
 参考 Transolver（ICLR 2024）：每层把 N 个点软分配到固定数量的 slice 上，在 slice
 之间做注意力，再按同一权重投影回点。slice 数固定，输入点数变化时表征容量不变，
 因此换查询密度不随之调整。
+
+给出 `input_domains` 时流场与船面点云拼成同一片点云联合编码（船体几何因此进入流场
+预测），`conditioning: film` 在 block 入口做逐层 FiLM；缺省时保持历史口径的独立编码
+与工况加性偏置。
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from point_cloud import ConditionBias, flow_cloud, hull_cloud, lattice_index
+from point_cloud import (CloudEmbedding, ConditionBias, apply_modulation, flow_cloud,
+                         hull_cloud, lattice_index, token_modulation)
 
 
 class PhysicsAttention(nn.Module):
@@ -43,42 +48,72 @@ class PhysicsAttention(nn.Module):
 
 
 class TransolverBlock(nn.Module):
-    def __init__(self, d_model, nhead, slices, mlp_ratio=4, dropout=0.0):
+    def __init__(self, d_model, nhead, slices, mlp_ratio=4, dropout=0.0, conditioning=None,
+                 condition_dim=2):
         super().__init__()
+        self.modulation = token_modulation(conditioning, condition_dim, d_model)
         self.norm_attention = nn.LayerNorm(d_model)
         self.attention = PhysicsAttention(d_model, nhead, slices, dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
         self.mlp = nn.Sequential(nn.Linear(d_model, int(mlp_ratio * d_model)), nn.GELU(),
                                  nn.Linear(int(mlp_ratio * d_model), d_model))
 
-    def forward(self, tokens):
+    def forward(self, tokens, condition=None):
+        tokens = apply_modulation(tokens, self.modulation, condition)
         tokens = tokens + self.attention(self.norm_attention(tokens))
         return tokens + self.mlp(self.norm_mlp(tokens))
 
 
 class TransolverBaseline(nn.Module):
     def __init__(self, d_model=160, nhead=8, layers=3, slices=32, mlp_ratio=2,
-                 dropout=0.0, condition_dim=2, flow_channels=5, hull_channels=1):
+                 dropout=0.0, condition_dim=2, flow_channels=5, hull_channels=1,
+                 input_domains=None, output_domains=None, conditioning=None):
         super().__init__()
-        self.flow_input = nn.Linear(3, d_model)
-        self.hull_input = nn.Linear(8, d_model)
-        self.condition = ConditionBias(condition_dim, d_model)
+        self.input_domains = tuple(input_domains) if input_domains else ("flow", "hull")
+        self.output_domains = tuple(output_domains) if output_domains else ("flow", "hull")
+        self.joint = input_domains is not None
+        if self.joint:
+            self.cloud = CloudEmbedding(d_model)
+        else:
+            self.flow_input = nn.Linear(3, d_model)
+            self.hull_input = nn.Linear(8, d_model)
+        self.condition = ConditionBias(condition_dim, d_model) if conditioning is None else None
         self.blocks = nn.ModuleList([
-            TransolverBlock(d_model, nhead, slices, mlp_ratio, dropout) for _ in range(layers)])
+            TransolverBlock(d_model, nhead, slices, mlp_ratio, dropout, conditioning,
+                            condition_dim) for _ in range(layers)])
         self.norm = nn.LayerNorm(d_model)
-        self.flow_head = nn.Linear(d_model, flow_channels)
-        self.hull_head = nn.Linear(d_model, hull_channels)
+        self.flow_head = (nn.Linear(d_model, flow_channels)
+                          if "flow" in self.output_domains else None)
+        self.hull_head = (nn.Linear(d_model, hull_channels)
+                          if "hull" in self.output_domains else None)
 
-    def _points(self, features, projection, bias):
-        tokens = projection(features) + bias
+    def _points(self, tokens, bias, condition=None):
+        tokens = tokens + bias
         for block in self.blocks:
-            tokens = block(tokens)
+            tokens = block(tokens, condition)
         return self.norm(tokens)
 
     def forward(self, batch, flow_queries):
         """输入整片点云，输出查询点处的场值；批大小固定为 1。"""
-        bias = self.condition(batch["condition"])
-        flow = self.flow_head(self._points(flow_cloud(batch), self.flow_input, bias))
-        flow = flow[0].index_select(0, lattice_index(batch, flow_queries[0]))[None]
-        hull = self.hull_head(self._points(hull_cloud(batch), self.hull_input, bias))
-        return {"flow": flow, "hull": hull}
+        condition = batch["condition"]
+        bias = self.condition(condition) if self.condition is not None else 0.0
+        output = {}
+        values = None
+        if self.joint:
+            tokens, _, count = self.cloud(batch)
+            values = self._points(tokens, bias, condition)[0]
+        if self.flow_head is not None:
+            if self.joint:
+                flow = self.flow_head(values[:count])
+            else:
+                flow = self.flow_head(
+                    self._points(self.flow_input(flow_cloud(batch)), bias, condition)[0])
+            output["flow"] = flow.index_select(
+                0, lattice_index(batch, flow_queries[0]))[None]
+        if self.hull_head is not None:
+            if self.joint:
+                output["hull"] = self.hull_head(values[count:])[None]
+            else:
+                output["hull"] = self.hull_head(
+                    self._points(self.hull_input(hull_cloud(batch)), bias, condition))
+        return output

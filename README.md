@@ -28,6 +28,19 @@ ShipBenchv2 由 OpenFOAM 稳态算例构建，包含：
 船体压力预测保留为下游与消融功能，对应
 `configs/appsolver_v2/appsolver_v2_joint_flow_hull_random_seed0.yaml`。
 
+## 主实验基线
+
+主实验对比 9 个模型，口径完全一致（自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、
+`lambda_hull=0.0`）：APPSolver-v2、APP+OFormer、APPSolver-v1、GNOT、UPT、Transolver、
+OFormer、GINO、CORAL。覆盖面 `random_seed0` / `loto_kvlcc2` / `lofo_fr_design` 三个
+划分，配置由 `scripts/train/make_split_configs.py` 从各模型
+`configs/<模型>/<模型>_multihull_normal.yaml` 派生。
+
+新基线按论文路线实现：GINO 为「输入几何点云 → GNO 半径核积分到潜规则网格 → FNO →
+GNO 解码到任意查询点」，CORAL 为「点集编码到 latent → latent 调制的 SIREN 坐标神经场
+解码任意查询点」，UPT 的 `decoder(x, query_x, query_fx)` 在查询坐标上独立解码。实现
+依据与口径见 `docs/main_experiment_protocol.md`。
+
 ## 训练与评测
 
 使用 `/opt/miniconda3/envs/mesh` 环境，并确保配置引用的归一化统计量已由训练集生成。
@@ -39,6 +52,9 @@ python3 scripts/train/train_model.py \
 python3 scripts/eval/evaluate_model.py \
   --config configs/appsolver_v2/appsolver_v2_flow_with_hull_random_seed0.yaml \
   --checkpoint best.pt --strides 1 2 4 8
+# 固定输入编码密度、只改变查询密度（UPT / GINO / CORAL / OFormer / APP 系列）
+python3 scripts/eval/evaluate_model.py \
+  --config configs/gino/gino_random_seed0.yaml --encode-stride 2
 
 python3 scripts/eval/profile_model_flops.py
 python3 -m pytest tests
@@ -52,6 +68,8 @@ configs/
 ├── appsolver_v2/
 ├── appsolver_oformer/
 ├── appsolver_v1/
+├── coral/
+├── gino/
 ├── gnot/
 ├── oformer/
 ├── transolver/
@@ -64,6 +82,7 @@ configs/
 - `AGENT.md`：数据、模型和开发约定
 - `TODO.md`：正式实验计划
 - `docs/paper/paper_outline.md`：论文贡献与实验大纲
+- `docs/main_experiment_protocol.md`：主实验统一口径、基线实现依据与跨分辨率评测
 - `docs/three_split_evaluation.md`：多模型与多划分结果
 - `docs/framework_ablation.md`：船体融合机制消融
 - `docs/partition_ablation.md`：Patch 分词消融

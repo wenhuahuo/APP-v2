@@ -17,7 +17,6 @@ latent 数量固定，输入点数变化时表征容量不变；解码只依赖�
 联合编码，否则保持历史口径的独立编码。
 """
 
-import torch
 import torch.nn as nn
 
 from point_cloud import (CloudEmbedding, ConditionBias, PerceiverEncoder, apply_modulation,

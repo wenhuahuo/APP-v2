@@ -11,7 +11,11 @@
 APP 按物理尺寸把点集压成 patch token，OFormer 保留每个输入点做线性注意力。
 与原始仓库的差异只有维度取整（交叉注意力在 d_model 而不是 d_model/2）与激活函数，
 机制保持一致。输入特征与其它基线相同（流场 `(x, y, sdf)`、船面八维特征），
-位置取特征的前两维（流场 `(x, y)`、船面 `(u, v)`）。
+历史口径的位置取特征的前两维（流场 `(x, y)`、船面 `(u, v)`）。
+
+给出 `input_domains` 时流场与船面点云拼成同一片点云联合编码（船体几何因此进入流场
+预测，两域共用物理 `(x, y)` 作旋转位置），`conditioning: film` 在编码/解码 block 入口
+做逐层 FiLM；缺省时保持历史口径的独立编码与工况加性偏置。
 """
 
 import math
@@ -19,7 +23,8 @@ import math
 import torch
 import torch.nn as nn
 
-from point_cloud import ConditionBias, flow_cloud, hull_cloud
+from point_cloud import (CloudEmbedding, ConditionBias, apply_modulation, flow_cloud,
+                         hull_cloud, token_modulation)
 
 
 class RotaryEmbedding(nn.Module):
@@ -147,27 +152,33 @@ class FeedForward(nn.Module):
 
 
 class EncoderBlock(nn.Module):
-    def __init__(self, d_model, nhead, mlp_ratio, min_freq, scale, dropout):
+    def __init__(self, d_model, nhead, mlp_ratio, min_freq, scale, dropout,
+                 conditioning=None, condition_dim=2):
         super().__init__()
+        self.modulation = token_modulation(conditioning, condition_dim, d_model)
         self.norm_attention = nn.LayerNorm(d_model)
         self.attention = GalerkinAttention(d_model, nhead, min_freq, scale, dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
         self.mlp = FeedForward(d_model, mlp_ratio, dropout)
 
-    def forward(self, tokens, coordinates):
+    def forward(self, tokens, coordinates, condition=None):
+        tokens = apply_modulation(tokens, self.modulation, condition)
         tokens = tokens + self.attention(self.norm_attention(tokens), coordinates)
         return tokens + self.mlp(self.norm_mlp(tokens))
 
 
 class DecoderBlock(nn.Module):
-    def __init__(self, d_model, nhead, mlp_ratio, min_freq, scale, dropout):
+    def __init__(self, d_model, nhead, mlp_ratio, min_freq, scale, dropout,
+                 conditioning=None, condition_dim=2):
         super().__init__()
+        self.modulation = token_modulation(conditioning, condition_dim, d_model)
         self.norm_cross = nn.LayerNorm(d_model)
         self.cross = CrossGalerkinAttention(d_model, nhead, min_freq, scale, dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
         self.mlp = FeedForward(d_model, mlp_ratio, dropout)
 
-    def forward(self, queries, latents, query_coords, latent_coords):
+    def forward(self, queries, latents, query_coords, latent_coords, condition=None):
+        queries = apply_modulation(queries, self.modulation, condition)
         queries = queries + self.cross(self.norm_cross(queries), latents, query_coords,
                                        latent_coords)
         return queries + self.mlp(self.norm_mlp(queries))
@@ -204,14 +215,21 @@ class OFormerBaseline(nn.Module):
     def __init__(self, d_model=128, nhead=8, encoder_layers=2, decoder_layers=2,
                  mlp_ratio=4.0, propagator_layers=2, fourier_scale=8.0,
                  rotary_min_freq=0.25, rotary_scale=16.0, dropout=0.0, condition_dim=2,
-                 flow_channels=5, hull_channels=1):
+                 flow_channels=5, hull_channels=1, input_domains=None, output_domains=None,
+                 conditioning=None):
         super().__init__()
-        self.flow_input = nn.Linear(3, d_model)
-        self.hull_input = nn.Linear(8, d_model)
-        self.condition = ConditionBias(condition_dim, d_model)
+        self.input_domains = tuple(input_domains) if input_domains else ("flow", "hull")
+        self.output_domains = tuple(output_domains) if output_domains else ("flow", "hull")
+        self.joint = input_domains is not None
+        if self.joint:
+            self.cloud = CloudEmbedding(d_model)
+        else:
+            self.flow_input = nn.Linear(3, d_model)
+            self.hull_input = nn.Linear(8, d_model)
+        self.condition = ConditionBias(condition_dim, d_model) if conditioning is None else None
         self.encoder = nn.ModuleList([
-            EncoderBlock(d_model, nhead, mlp_ratio, rotary_min_freq, rotary_scale, dropout)
-            for _ in range(encoder_layers)])
+            EncoderBlock(d_model, nhead, mlp_ratio, rotary_min_freq, rotary_scale, dropout,
+                         conditioning, condition_dim) for _ in range(encoder_layers)])
         self.norm = nn.LayerNorm(d_model)
 
         # 查询侧：坐标 → Fourier 特征 → 交叉注意力 → 位置感知 propagator → 输出头
@@ -219,36 +237,55 @@ class OFormerBaseline(nn.Module):
             GaussianFourierFeatures(2, d_model // 2, fourier_scale), nn.GELU(),
             nn.Linear(d_model, d_model))
         self.decoder = nn.ModuleList([
-            DecoderBlock(d_model, nhead, mlp_ratio, rotary_min_freq, rotary_scale, dropout)
-            for _ in range(decoder_layers)])
+            DecoderBlock(d_model, nhead, mlp_ratio, rotary_min_freq, rotary_scale, dropout,
+                         conditioning, condition_dim) for _ in range(decoder_layers)])
         self.propagator = nn.ModuleList([
             Propagator(d_model, mlp_ratio) for _ in range(propagator_layers)])
-        self.flow_head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, d_model // 2),
-                                       nn.GELU(), nn.Linear(d_model // 2, flow_channels))
-        self.hull_head = nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, d_model // 2),
-                                       nn.GELU(), nn.Linear(d_model // 2, hull_channels))
+        self.flow_head = (nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, d_model // 2),
+                                        nn.GELU(), nn.Linear(d_model // 2, flow_channels))
+                          if "flow" in self.output_domains else None)
+        self.hull_head = (nn.Sequential(nn.LayerNorm(d_model), nn.Linear(d_model, d_model // 2),
+                                        nn.GELU(), nn.Linear(d_model // 2, hull_channels))
+                          if "hull" in self.output_domains else None)
 
-    def _points(self, features, projection, bias, query_coords):
-        """整片点云编码一次，再在查询坐标处解码。"""
-        coordinates = features[..., :2]
-        latents = projection(features) + bias
+    def _encode(self, tokens, coordinates, condition):
         for block in self.encoder:
-            latents = block(latents, coordinates)
-        latents = self.norm(latents)
+            tokens = block(tokens, coordinates, condition)
+        return self.norm(tokens)
 
+    def _decode(self, latents, latent_coords, query_coords, condition):
+        """整片点云编码一次，再在查询坐标处解码。"""
         queries = self.coordinates(query_coords)
         for block in self.decoder:
-            queries = block(queries, latents, query_coords, coordinates)
+            queries = block(queries, latents, query_coords, latent_coords, condition)
         for layer in self.propagator:
             queries = layer(queries, query_coords)
         return queries
 
     def forward(self, batch, flow_queries):
-        """批大小固定为 1；流场在任意查询点上取值，船面取整条湿表面。"""
-        bias = self.condition(batch["condition"])
-        flow = self.flow_head(self._points(flow_cloud(batch), self.flow_input, bias,
-                                          flow_queries[..., :2]))
-        hull_features = hull_cloud(batch)
-        hull = self.hull_head(self._points(hull_features, self.hull_input, bias,
-                                          hull_features[..., :2]))
-        return {"flow": flow, "hull": hull}
+        """批大小固定为 1；流场在任意查询点上取值。"""
+        condition = batch["condition"]
+        bias = self.condition(condition) if self.condition is not None else 0.0
+        output = {}
+        if self.joint:
+            tokens, coordinates, count = self.cloud(batch)
+            latents = self._encode(tokens + bias, coordinates, condition)
+            if self.flow_head is not None:
+                output["flow"] = self.flow_head(
+                    self._decode(latents, coordinates, flow_queries[..., :2], condition))
+            if self.hull_head is not None:
+                output["hull"] = self.hull_head(
+                    self._decode(latents, coordinates, coordinates[:, count:], condition))
+            return output
+
+        if self.flow_head is not None:
+            features = flow_cloud(batch)
+            latents = self._encode(self.flow_input(features) + bias, features[..., :2], condition)
+            output["flow"] = self.flow_head(
+                self._decode(latents, features[..., :2], flow_queries[..., :2], condition))
+        if self.hull_head is not None:
+            features = hull_cloud(batch)
+            latents = self._encode(self.hull_input(features) + bias, features[..., :2], condition)
+            output["hull"] = self.hull_head(
+                self._decode(latents, features[..., :2], features[..., :2], condition))
+        return output

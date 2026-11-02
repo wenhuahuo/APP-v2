@@ -2,6 +2,12 @@
 stats: dataset/shipbench/stats_lofo_fr_design.json
 model_type: oformer
 model:
+  input_domains:
+  - flow
+  - hull
+  output_domains:
+  - flow
+  conditioning: film
   d_model: 128
   nhead: 8
   encoder_layers: 2
@@ -80,7 +86,7 @@ train:
   weight_decay: 0.0001
   batch_queries: 4096
   val_queries: 16384
-  lambda_hull: 1.0
+  lambda_hull: 0.0
   seed: 0
   val_entries:
   - containership_dtc_w025_fr022_normal_mesh

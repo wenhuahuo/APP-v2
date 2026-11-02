@@ -1,10 +1,11 @@
-"""按 `configs/splits_multihull.json` 从 7 个多船型配置派生 3 个划分的配置。
+"""按 `configs/splits_multihull.json` 从主实验基础配置派生 3 个划分的配置。
 
     python3 scripts/train/make_split_configs.py
 
 每个派生配置只改三处：`train.entries`、`train.val_entries`、`stats`（指向该划分
-训练集拟合的统计量）。模型结构与优化超参与 `*_multihull_normal.yaml` 完全一致，
-因此 7 个模型之间仍是 248 GFLOPs 等算力对照。
+训练集拟合的统计量）。模型结构、任务口径与优化超参与 `*_multihull_normal.yaml` 完全
+一致（双域输入、仅流场输出、逐层 FiLM、`lambda_hull=0.0`），因此 9 个模型之间是同
+口径对照。
 """
 
 import json
@@ -32,8 +33,8 @@ def main():
     splits = {k: v for k, v in json.loads((CONFIG_DIR / "splits_multihull.json").read_text()).items()
               if not k.startswith("_")}
     bases = sorted(CONFIG_DIR.glob(f"*/*{BASE_SUFFIX}.yaml"))
-    if len(bases) != 7:
-        raise RuntimeError(f"期望 7 个基础配置，实际 {len(bases)}")
+    if len(bases) != 9:
+        raise RuntimeError(f"期望 9 个基础配置，实际 {len(bases)}")
     for base in bases:
         model = base.stem[: -len(BASE_SUFFIX)]
         # 基础配置开头写着旧的 4+2 船型划分，派生配置换成自己的头注释

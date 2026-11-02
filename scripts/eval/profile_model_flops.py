@@ -27,7 +27,6 @@ for name in ("datapipe", "app", "baseline", "model", "train", "eval"):
 
 from build import build_model  # noqa: E402
 from collate import collate_samples  # noqa: E402
-from normalize import Normalizer  # noqa: E402
 from ship_dataset import ShipDataset  # noqa: E402
 from tokenizer import flow_tokens, hull_tokens  # noqa: E402
 

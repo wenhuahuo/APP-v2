@@ -1,5 +1,5 @@
-# GINO：4 船型训练 / 2 船型验证的多船型数据集（normal 网格），主实验统一口径
-# 输入自由液面 + 船体表面、仅流场输出、逐层 FiLM 工况融合、lambda_hull=0.0
+# GINO：4 船型训练 / 2 船型验证的多船型数据集（normal 网格）
+# 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、lambda_hull=0.0
 stats: dataset/shipbench/stats.json
 model_type: gino
 model:

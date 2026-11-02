@@ -1,9 +1,14 @@
 # Transolver：4 船型训练 / 2 船型验证的多船型数据集（normal 网格）
-# 训练集 kcs_fr026_normal_mesh, dtc_fr022_normal_mesh, series60_fr022_normal_mesh, containership_fr022_normal_mesh
-# 验证集 s175_fr029_normal_mesh, kvlcc2_fr014_normal_mesh
+# 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、lambda_hull=0.0
 stats: dataset/shipbench/stats.json
 model_type: transolver
 model:
+  input_domains:
+  - flow
+  - hull
+  output_domains:
+  - flow
+  conditioning: film
   d_model: 208
   nhead: 8
   layers: 3
@@ -27,7 +32,7 @@ train:
   weight_decay: 0.0001
   batch_queries: 4096
   val_queries: 16384
-  lambda_hull: 1.0
+  lambda_hull: 0.0
   seed: 0
   val_entries:
   - s175_fr029_normal_mesh
