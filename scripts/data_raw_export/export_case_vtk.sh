@@ -1,5 +1,5 @@
 #!/bin/bash
-# 站点端：把单个算例末态导出为 VTK 原始数据包，供本地组装数据集使用。
+# 集群端：把单个算例末态导出为 VTK 原始数据包，供数据集组装使用。
 #
 # 用法: export_case_vtk.sh <case-dir> <out-root> [time]
 # 产物: <out-root>/<case>/{internal.vtu,hull.vtp,KCS_Hull.stl.gz,
@@ -10,7 +10,7 @@
 # 不给 time 时导出最新时刻；给 time 时导出该物理时刻（顶层缺该时刻要先 reconstructPar）。
 #
 # foamToVTK 写在 <out-root>/.foamtovtk-<case>/ 这个临时目录里，包目录只放上面几个
-# 文件：VTK/ 里的 internal.vtu 与包里的完全相同，留在包里等于把回传体积翻一倍。
+# 文件：VTK/ 里的 internal.vtu 与包里的完全相同，包目录只保留组装所需文件。
 set -eo pipefail
 
 CASE=$(cd "$1" && pwd)
@@ -23,8 +23,7 @@ TMP=$OUT/.foamtovtk-$NAME
 
 [[ -n "$NAME" && "$WORK" == "$OUT"/* ]] || { echo "输出路径异常: $WORK" >&2; exit 2; }
 
-# 集群走 module（非交互 shell 要先 source 一次 module 初始化），
-# 租用服务器没有 module，由 OPENFOAM_BASHRC 指定 bashrc
+# 集群通过 module 加载 OpenFOAM；也可用 OPENFOAM_BASHRC 显式指定环境。
 if ! command -v module >/dev/null 2>&1 && [[ -f /etc/profile.d/openscow-modules.sh ]]; then
   source /etc/profile.d/openscow-modules.sh
 fi
