@@ -28,7 +28,8 @@ D_MODEL = 16
 CONDITION = torch.tensor([[0.26, 9.0], [0.31, 8.8]])
 
 MODEL = dict(flow_size_tiers=[[0.5, 0.4], [None, 0.6]], hull_size=0.6, d_model=D_MODEL,
-             nhead=2, encoder_layers=2, decoder_layers=2, fourier_features=4)
+             nhead=2, encoder_layers=2, decoder_layers=2, fourier_features=4,
+             output_domains=("flow", "hull"))
 
 
 def synthetic_batch():

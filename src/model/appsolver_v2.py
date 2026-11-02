@@ -1,18 +1,11 @@
-"""APPSolver-v2：APP 分词 + 求积权重注意力主干 + 查询解码器，两个输出域。
+"""APPSolver-v2：自适应 Patch 分词、求积权重注意力与坐标查询解码。
 
-流程（每个样本）：
+默认输入自由液面坐标和船体表面编码，仅预测五个自由液面流场通道；船体压力输出
+可通过 `output_domains` 显式启用。流场分词支持自适应硬分块、均匀硬分块和学习软分块。
 
-1. 船体域按物理尺寸划 patch；流场域默认按到船体水线的距离自适应划分，
-   也可配置为均匀硬分块或学习软分块，token 均为求积加权平均；
-2. 两个域的 token 拼成一条序列，加域标记与 patch 形心的位置编码，过一个 transformer。
-3. 查询点（自由液面任意坐标 / 船体湿表面任意 UV）经坐标基与交叉注意力取回该处取值，
-   分别过流场头与船面压力头。
-
-工况参数（Fr、log10 Re）由 `conditioning` 配置融合：`none` / `film` / `adaln` /
-`adaln_zero` / `fourier_add` / `cond_token` / `cond_xattn`。前四种为已有调制路线；
-`fourier_add` 逐层加入 Fourier 工况编码，`cond_token` 向编码器序列添加一个条件
-上下文 token，`cond_xattn` 在每层插入零门控条件交叉注意力。编码器与查询解码器
-共用同一策略，几何坐标位置编码和查询分辨率无关性保持不变。
+工况参数（Fr、log10 Re）默认通过逐层 FiLM 融合。`conditioning` 同时控制编码器与
+查询解码器，可选 `none` / `film` / `adaln` / `adaln_zero` / `fourier_add` /
+`cond_token` / `cond_xattn`，用于工况融合消融。
 """
 
 import numpy as np
@@ -35,7 +28,7 @@ class APPSolverV2(nn.Module):
                  positional="fourier", query_basis="siren", fourier_features=16,
                  fourier_scale=4.0, condition_dim=2, conditioning="film",
                  flow_channels=5, hull_channels=1, max_level=12,
-                 input_domains=("flow", "hull"), output_domains=("flow", "hull"),
+                 input_domains=("flow", "hull"), output_domains=("flow",),
                  flow_tokenizer="adaptive", flow_uniform_size=0.1, flow_learned_tokens=512):
         super().__init__()
         self.input_domains = tuple(input_domains)

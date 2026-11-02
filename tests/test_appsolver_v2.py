@@ -42,6 +42,14 @@ class APPSolverV2Test(unittest.TestCase):
     def test_forward_shapes(self):
         model = build_model()
         output = model(self.batch, self.queries)
+        self.assertEqual(set(output), {"flow"})
+        self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
+        self.assertIsNotNone(model.hull_input)
+        self.assertIsNone(model.hull_head)
+
+    def test_joint_flow_and_hull_output(self):
+        model = build_model(output_domains=("flow", "hull"))
+        output = model(self.batch, self.queries)
         self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
         self.assertEqual(tuple(output["hull"].shape),
                          (1, self.batch["hull_uv"].shape[1], 1))
@@ -54,7 +62,7 @@ class APPSolverV2Test(unittest.TestCase):
     def test_gradients_reach_every_parameter(self):
         model = build_model()
         output = model(self.batch, self.queries)
-        loss = output["flow"].sum() + output["hull"].sum()
+        loss = output["flow"].sum()
         loss.backward()
         missing = [name for name, parameter in model.named_parameters()
                    if parameter.grad is None or not torch.isfinite(parameter.grad).all()]
@@ -92,7 +100,7 @@ class APPSolverV2Test(unittest.TestCase):
         model = build_model(flow_tokenizer="learned", flow_learned_tokens=16)
         output = model(self.batch, self.queries)
         self.assertEqual(tuple(output["flow"].shape), (1, QUERY_COUNT, 5))
-        (output["flow"].sum() + output["hull"].sum()).backward()
+        output["flow"].sum().backward()
         for parameter in model.learned_flow.parameters():
             self.assertIsNotNone(parameter.grad)
             self.assertTrue(torch.isfinite(parameter.grad).all())

@@ -1,4 +1,4 @@
-"""训练循环：查询点集随机子采样、两域联合损失、按验证损失选 checkpoint。
+"""训练循环：查询点集随机子采样、按启用输出域计算损失、按验证损失选 checkpoint。
 
 自由液面域有十万量级查询点，每步随机抽一部分计算损失；查询是输出函数上的采样，
 抽子集不改变模型的定义。验证用的是独立条目（`train.val_entries`），固定查询点集，
@@ -85,7 +85,7 @@ class Trainer:
             index = (self._sample_queries(self.config["batch_queries"], self.generator, dataset)
                      if "flow" in self.domains else None)
             _, flow, hull = self._forward(sample, index)
-            losses = appsolver_loss(flow, hull, self.config["lambda_hull"])
+            losses = appsolver_loss(flow, hull, self.config.get("lambda_hull", 0.0))
 
             self.optimizer.zero_grad()
             losses["total"].backward()
@@ -100,7 +100,7 @@ class Trainer:
         totals = {domain: 0.0 for domain in self.domains}
         for i in range(len(dataset)):
             _, flow, hull = self._forward(dataset[i], self.val_queries)
-            losses = appsolver_loss(flow, hull, self.config["lambda_hull"])
+            losses = appsolver_loss(flow, hull, self.config.get("lambda_hull", 0.0))
             for key in totals:
                 totals[key] += losses[key]
         return {key: value / len(dataset) for key, value in totals.items()}
@@ -122,7 +122,7 @@ class Trainer:
             if validate:
                 metrics = self.evaluate()
                 validation = (metrics.get("flow", 0.0)
-                              + self.config["lambda_hull"] * metrics.get("hull", 0.0))
+                              + self.config.get("lambda_hull", 0.0) * metrics.get("hull", 0.0))
                 record["validation"] = validation
                 record.update({key: float(value) for key, value in metrics.items()})
                 details = "".join(f"  val {key} {float(value):.5f}"

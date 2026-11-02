@@ -13,7 +13,7 @@ def weighted_mse(prediction, target, weight):
     return (weight[..., None] * (prediction - target) ** 2).sum() / (weight.sum() * channels)
 
 
-def appsolver_loss(flow, hull, lambda_hull=1.0):
+def appsolver_loss(flow, hull, lambda_hull=0.0):
     """flow、hull 为三元组或 None；总损失只包含启用的预测域。"""
     losses = {}
     total = 0.0

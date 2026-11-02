@@ -31,6 +31,14 @@ class SampleQueriesTest(unittest.TestCase):
 
 
 class SingleDomainLossTest(unittest.TestCase):
+    def test_hull_loss_is_disabled_by_default(self):
+        prediction = torch.tensor([[1.0], [2.0]])
+        target = torch.zeros_like(prediction)
+        weight = torch.ones(2)
+        losses = appsolver_loss(None, (prediction, target, weight))
+        self.assertEqual(float(losses["total"]), 0.0)
+        self.assertGreater(float(losses["hull"]), 0.0)
+
     def test_only_active_domain_contributes_to_total(self):
         prediction = torch.tensor([[1.0], [2.0]])
         target = torch.zeros_like(prediction)
