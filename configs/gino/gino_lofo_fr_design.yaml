@@ -8,9 +8,9 @@ model:
   output_domains:
   - flow
   latent_shape:
-  - 24
-  - 12
-  - 6
+  - 32
+  - 16
+  - 8
   n_modes:
   - 8
   - 4
@@ -20,8 +20,8 @@ model:
   embed_channels: 32
   gno_embed_channels: 24
   gno_kernel_hidden: 64
-  in_radius: 0.02
-  out_radius: 0.06
+  in_radius: 0.03
+  out_radius: 0.09
   gno_chunk: 4096
   lifting_channels: 128
   projection_channels: 128

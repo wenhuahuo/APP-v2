@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 for name in ("datapipe", "app", "baseline", "model", "eval"):
     sys.path.insert(0, str(ROOT / "src" / name))
 
+from coral import CORALBaseline  # noqa: E402
+from gino import GINOBaseline  # noqa: E402
 from gnot import GNOTBaseline  # noqa: E402
 from normalize import Normalizer  # noqa: E402
 from query_density import density_sweep  # noqa: E402
@@ -179,6 +181,31 @@ class EncodeStrideProtocolTest(unittest.TestCase):
         expected = [tuple(ShipDataset(DATASET, [ENTRY], stride=stride).flow_coords.shape[:2])
                     for stride in (1, 2)]
         self.assertEqual([tuple(shape) for shape in model.input_points], expected)
+
+    def test_query_decoding_models_run_the_fixed_input_protocol(self):
+        """UPT / GINO / CORAL 都能在固定输入密度上换查询密度解码。"""
+        models = {
+            "upt": small_upt(input_domains=("flow", "hull"), output_domains=("flow",),
+                             conditioning="film"),
+            "gino": GINOBaseline(latent_shape=(6, 5, 4), n_modes=(3, 2, 2),
+                                 hidden_channels=16, fno_layers=2, embed_channels=8,
+                                 gno_embed_channels=6, gno_kernel_hidden=16,
+                                 in_radius=0.2, out_radius=0.3, gno_chunk=64,
+                                 lifting_channels=16, projection_channels=16),
+            "coral": CORALBaseline(d_model=32, nhead=4, encoder_layers=1, latents=8,
+                                   siren_hidden=16, siren_layers=3, modulation_hidden=16),
+        }
+        coarse = ShipDataset(DATASET, [ENTRY], stride=2)[0]
+        for name, model in models.items():
+            with self.subTest(model=name):
+                results = density_sweep(model, normalizer(), DATASET, [ENTRY], (2, 4), "cpu",
+                                        4096, encode_stride=2)
+                # 查询点数随 stride 变化，但输入始终是 stride=2 的格点（不会因密度不一致报错）
+                self.assertEqual(results[2][ENTRY]["flow"]["n_points"],
+                                 int(coarse["flow_mask"].sum()))
+                fine = ShipDataset(DATASET, [ENTRY], stride=4)[0]
+                self.assertEqual(results[4][ENTRY]["flow"]["n_points"],
+                                 int(fine["flow_mask"].sum()))
 
     def test_lattice_models_reject_fixed_encode_density(self):
         model = GNOTBaseline(d_model=24, nhead=4, layers=1, mlp_ratio=2, n_experts=2)

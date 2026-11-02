@@ -10,10 +10,10 @@ model:
   d_model: 176
   nhead: 8
   encoder_layers: 2
-  latents: 64
+  latents: 128
   mlp_ratio: 4
   siren_hidden: 176
-  siren_layers: 4
+  siren_layers: 6
   w0: 30.0
   w0_initial: 30.0
   modulate_shift: true
