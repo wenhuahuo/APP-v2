@@ -67,8 +67,10 @@ def predict_entry(model, normalizer, sample, device, chunk=CHUNK, query_sample=N
             queries = coords[part][None].to(device)
             prediction.append(_flow_chunk(model, batch, state, queries)[0].cpu())
         flow_prediction = torch.cat(prediction)
-        if "hull" in domains and state is not None:
-            # 船面输出与流场查询点无关，单独前向一次即可，不必在分块循环里重复
+        if "hull" in domains:
+            # 船面输出与流场查询点无关，整片前向一次即可，不必在分块循环里重复。
+            # 没有独立 `encode` 的模型（如 APP+OFormer 的联合预测）在这里补一次完整前向，
+            # 否则船面指标会被静默跳过。
             hull_prediction = model(batch, coords[:1][None].to(device))["hull"][0][:, 0].cpu()
     elif "hull" in domains:
         output = model(batch)

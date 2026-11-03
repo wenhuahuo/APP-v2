@@ -8,6 +8,8 @@ OFormer 基线保留每个输入点做线性注意力；这里只把输入换成
 给出 `input_domains` 时流场与船面的 patch token 用各自的线性投影加域标识后拼进同一
 个编码器（与 APPSolver-v2 的双域口径一致，船体几何因此进入流场预测），`conditioning:
 film` 在编码/解码 block 入口做逐层 FiLM；缺省时保持历史口径的独立编码与工况加性偏置。
+`input_domains` 只给出一个域时（船体融合消融的 `flow_only`）只拼该域 token，另一域的
+分词与投影不参与前向。
 """
 
 import torch
@@ -71,20 +73,30 @@ class APPSolverOFormer(nn.Module):
         return queries
 
     def _patches(self, batch, index=0):
-        flow = flow_tokens(batch, index, self.flow_size_tiers, self.max_level)
-        hull = hull_tokens(batch, index, self.hull_size, self.max_level)
+        """按 `input_domains` 分词；未启用的输入域不构造 token。"""
+        flow = (flow_tokens(batch, index, self.flow_size_tiers, self.max_level)
+                if "flow" in self.input_domains else None)
+        hull = (hull_tokens(batch, index, self.hull_size, self.max_level)
+                if "hull" in self.input_domains else None)
         return flow, hull
 
     def _joint(self, flow, hull):
-        """两域 patch token 各自投影 + 域标识后拼接，流场 token 在前。
+        """启用的输入域 patch token 各自投影 + 域标识后拼接，流场 token 在前。
 
         逗号分词在 CPU 上完成（几何分区不参与梯度），投影前必须搬回参数所在设备；
-        形心同样要跟着搬，否则位置编码会与 latents 设备不一致。
+        形心同样要跟着搬，否则位置编码会与 latents 设备不一致。船体融合消融的
+        `flow_only` 只拼流场 token，`flow_with_hull` / `joint_flow_hull` 拼两域。
         """
         device = self.flow_input.weight.device
-        tokens = torch.cat([self.flow_input(flow[0].to(device)) + self.domain.weight[0],
-                            self.hull_input(hull[0].to(device)) + self.domain.weight[1]])
-        return tokens, torch.cat([flow[2], hull[2]]).to(device)
+        blocks = []
+        if flow is not None:
+            blocks.append(self.flow_input(flow[0].to(device)) + self.domain.weight[0])
+        if hull is not None:
+            blocks.append(self.hull_input(hull[0].to(device)) + self.domain.weight[1])
+        tokens = torch.cat(blocks)
+        centres = torch.cat([patches[2] for patches in (flow, hull)
+                             if patches is not None]).to(device)
+        return tokens, centres
 
     def forward(self, batch, flow_queries):
         """批大小固定为 1；流场在任意查询点上取值，船面取整条湿表面。"""
@@ -107,7 +119,7 @@ class APPSolverOFormer(nn.Module):
 
         for name, patches in (("flow", flow), ("hull", hull)):
             head = self.flow_head if name == "flow" else self.hull_head
-            if head is None:
+            if head is None or patches is None:
                 continue
             projection = self.flow_input if name == "flow" else self.hull_input
             centres = patches[2][None].to(projection.weight.device)
