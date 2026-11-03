@@ -24,7 +24,7 @@ for name in ("datapipe", "app", "baseline", "model", "train", "eval"):
 sys.path.insert(0, str(ROOT / "scripts" / "eval"))
 
 from aggregate import eta_rmse_mm, overall, pooled_channel  # noqa: E402
-from latency import fixed_inputs, summary, time_forward  # noqa: E402
+from latency import fixed_inputs, summary, summarize_sweeps, time_forward  # noqa: E402
 from report import metrics_filename  # noqa: E402
 import summarize_cross_resolution as summarize  # noqa: E402
 
@@ -125,6 +125,27 @@ class LatencyTest(unittest.TestCase):
         self.assertAlmostEqual(result["median"], 0.2, places=12)
         self.assertAlmostEqual(result["min"], 0.1, places=12)
         self.assertEqual(summary([0.5])["std"], 0.0)
+
+    def test_median_sweep_is_reported_and_every_sweep_is_kept(self):
+        """邻居作业让某一整轮变慢时，报告的均值/标准差来自中位轮次。"""
+        sweeps = [[0.10, 0.11], [0.30, 0.31], [0.20, 0.21]]
+        result = summarize_sweeps(sweeps)
+        self.assertEqual(result["selected_sweep"], 2)
+        self.assertAlmostEqual(result["mean"], 0.205, places=12)
+        self.assertEqual(result["sweeps"], 3)
+        self.assertEqual(result["sweep_means"],
+                         [statistics.fmean(sweep) for sweep in sweeps])
+        self.assertEqual(result["sweep_samples"], sweeps)
+        self.assertAlmostEqual(result["std"], statistics.stdev(sweeps[2]), places=12)
+
+    def test_single_sweep_is_supported_and_empty_sweeps_are_rejected(self):
+        result = summarize_sweeps([[0.2, 0.4]])
+        self.assertEqual(result["selected_sweep"], 0)
+        self.assertAlmostEqual(result["mean"], 0.3, places=12)
+        for sweeps in ([], [[]], [[0.1], []]):
+            with self.subTest(sweeps=sweeps):
+                with self.assertRaises(ValueError):
+                    summarize_sweeps(sweeps)
 
     def test_invalid_repeat_or_warmup_is_rejected(self):
         for warmup, repeat in ((-1, 2), (1, 0)):

@@ -88,9 +88,13 @@ def latency_row(model, label, suffix):
                        for stride in STRIDES},
             "query_points": {stride: record["strides"][str(stride)]["query_points"]
                              for stride in STRIDES},
+            "sweep_means": {stride: [1000.0 * value for value in
+                                      record["strides"][str(stride)]["sweep_means"]]
+                            for stride in STRIDES},
             "device": record["device"], "torch": record["torch"],
             "cuda": record["cuda"], "warmup": record["warmup"],
-            "repeat": record["repeat"], "entry": record["entry"]}
+            "repeat": record["repeat"], "sweeps": record["sweeps"],
+            "entry": record["entry"]}
 
 
 def rank(rows):
@@ -167,9 +171,12 @@ def main():
           f"最大差 {max(check['stride1_r2_delta'] for check in checks):.2e}；各 stride 的查询"
           f"点数全部一致：{all(check['query_points_match'] for check in checks)}。")
     devices = sorted({row["device"] for row in latency})
+    spread = max(max(row["sweep_means"][stride]) / min(row["sweep_means"][stride])
+                 for row in latency for stride in STRIDES)
     print(f"延迟设备 {'；'.join(devices)}；PyTorch {latency[0]['torch']}、CUDA "
           f"{latency[0]['cuda']}；warmup {latency[0]['warmup']}、repeat "
-          f"{latency[0]['repeat']}；条目 {latency[0]['entry']}。")
+          f"{latency[0]['repeat']}、sweeps {latency[0]['sweeps']}；条目 "
+          f"{latency[0]['entry']}；同一格的轮间极差最大 {100 * (spread - 1):.1f}%。")
 
     if args.json:
         Path(args.json).write_text(json.dumps(

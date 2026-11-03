@@ -2,7 +2,8 @@
 
 计时只覆盖一次完整前向 `model(batch, queries)`：模型自带的编码、分词与邻域搜索都在
 前向内部，因此计入；模型加载、归一化统计量与主机到设备的数据传输都在计时之外。每次
-前向前后各做一次 `torch.cuda.synchronize()`，warmup 的耗时不计入统计。
+前向前后各做一次 `torch.cuda.synchronize()`，warmup 的耗时不计入统计。共享集群上邻居
+作业会让某一整轮变慢，`summarize_sweeps` 取多轮均值的中位轮次作为报告值。
 
 输入由 `ShipDataset` 与 `collate_samples` 构造，与评测（`src/eval/evaluate.py`）同一
 条数据路径；查询坐标取该 stride 下的整片自由液面格点，计时期间张量不再改动。
@@ -66,3 +67,21 @@ def summary(samples):
         "min": min(samples),
         "median": statistics.median(samples),
     }
+
+
+def summarize_sweeps(sweeps):
+    """多轮扫过的汇总：取各轮均值的中位轮次，返回该轮的均值与标准差。
+
+    共享集群上偶发的邻居作业会让某一整轮整体变慢（同一条目、同一 stride 的 20 次重复
+    一起偏移），单轮均值因此不稳定。三轮以上取中位轮次作为该格的值，该轮自己的均值与
+    样本标准差就是报告值；每轮逐次耗时全部保留在 `sweep_samples` 里。
+    """
+    if not sweeps or any(not samples for samples in sweeps):
+        raise ValueError("没有计时样本")
+    means = [statistics.fmean(samples) for samples in sweeps]
+    median = statistics.median(means)
+    selected = min(range(len(means)), key=lambda index: abs(means[index] - median))
+    result = summary(sweeps[selected])
+    result.update({"sweeps": len(sweeps), "sweep_means": means, "selected_sweep": selected,
+                   "sweep_samples": sweeps})
+    return result

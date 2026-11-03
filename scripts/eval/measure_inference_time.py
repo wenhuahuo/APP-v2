@@ -7,7 +7,9 @@
 - 数据（冻结场输入点云、船面点云、工况、查询坐标）预先搬到 GPU，计时只含一次完整
   前向 `model(batch, queries)`，模型自带的编码、分词与 GINO 的邻域搜索都在前向内部；
 - 每次前向前后各 `torch.cuda.synchronize()`；warmup 与 repeat 由命令行给出（缺省 5 / 20），
-  报告均值与样本标准差，逐次耗时一并写入 JSON。
+  报告均值与样本标准差，逐次耗时一并写入 JSON；
+- 整套 (模型 × stride) 重复 `--sweeps` 轮，取各轮均值的中位轮次作为报告值，避免邻居
+  作业让某一整轮整体变慢；每轮的逐次耗时都保留在 JSON 里。
 
 每个配置写到 `output/<配置文件名>/inference_time.json`；`--json` 可另存一份合并结果。
 
@@ -29,7 +31,7 @@ for name in ("datapipe", "app", "baseline", "model", "train", "eval"):
     sys.path.insert(0, str(ROOT / "src" / name))
 
 from build import build_model  # noqa: E402
-from latency import fixed_inputs, summary, time_forward  # noqa: E402
+from latency import fixed_inputs, summarize_sweeps, time_forward  # noqa: E402
 
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
           "transolver", "oformer", "gino", "coral")
@@ -63,12 +65,12 @@ def measure(config_path, args):
     blocks = {}
     for stride in args.strides:
         batch, queries = fixed_inputs(dataset_root, args.entry, stride, device)
-        samples = time_forward(model, batch, queries, warmup=args.warmup, repeat=args.repeat)
+        sweeps = [time_forward(model, batch, queries, warmup=args.warmup, repeat=args.repeat)
+                  for _ in range(args.sweeps)]
         blocks[str(stride)] = {"query_points": int(queries.shape[1]),
                                "input_points": int(batch["flow_coords"].shape[1]
                                                    * batch["flow_coords"].shape[2]),
-                               **summary(samples),
-                               "samples": samples}
+                               **summarize_sweeps(sweeps)}
     record = {
         "config": str(config_path),
         "model_type": config["model_type"],
@@ -84,6 +86,7 @@ def measure(config_path, args):
         "cuda": torch.version.cuda,
         "warmup": args.warmup,
         "repeat": args.repeat,
+        "sweeps": args.sweeps,
         "sync": "torch.cuda.synchronize before and after every forward",
         "strides": blocks,
     }
@@ -102,6 +105,8 @@ def main():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeat", type=int, default=20)
+    parser.add_argument("--sweeps", type=int, default=3,
+                        help="整套模型×stride 重复几轮，取中位轮次（每轮都做 warmup 与 repeat）")
     parser.add_argument("--json", default=None, help="可选的合并结果路径")
     args = parser.parse_args()
 
@@ -122,7 +127,7 @@ def main():
         target = output_dir / "inference_time.json"
         target.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n")
         print(f"  写入 {target}（{record['device']}，warmup {args.warmup}，"
-              f"repeat {args.repeat}）")
+              f"repeat {args.repeat}，sweeps {args.sweeps}）")
 
     if args.json:
         Path(args.json).write_text(json.dumps(records, indent=2, ensure_ascii=False) + "\n")
