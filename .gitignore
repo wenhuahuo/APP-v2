@@ -8,6 +8,7 @@ logs/
 *.npy
 *.npz
 vis/**/*.png
+vis/**/*.pdf
 
 # Python
 __pycache__/
