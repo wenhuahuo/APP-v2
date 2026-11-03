@@ -89,11 +89,14 @@ class CountingModel(torch.nn.Module):
         self.weight = torch.nn.Parameter(torch.tensor(2.0))
         self.calls = 0
         self.grad_enabled = []
+        self.outputs = []
 
     def forward(self, batch, queries):
         self.calls += 1
         self.grad_enabled.append(torch.is_grad_enabled())
-        return {"flow": queries[..., :1] * self.weight}
+        output = {"flow": queries[..., :1] * self.weight}
+        self.outputs.append(output["flow"].detach().clone())
+        return output
 
 
 class LatencyTest(unittest.TestCase):
@@ -117,6 +120,16 @@ class LatencyTest(unittest.TestCase):
         torch.testing.assert_close(self.queries, self.queries_before)
         for key, value in self.batch.items():
             torch.testing.assert_close(value, self.batch_before[key])
+
+    def test_repeated_measurements_reproduce_the_same_outputs(self):
+        """计时不改变模型状态：两轮测量的逐次输出完全相同。"""
+        time_forward(self.model, self.batch, self.queries, warmup=1, repeat=2)
+        first = list(self.model.outputs)
+        time_forward(self.model, self.batch, self.queries, warmup=1, repeat=2)
+        second = self.model.outputs[len(first):]
+        self.assertEqual(len(first), 3)
+        for reference in first + second:
+            torch.testing.assert_close(reference, first[0])
 
     def test_summary_reports_mean_and_sample_std(self):
         result = summary([0.1, 0.3])
@@ -159,6 +172,14 @@ class LatencyTest(unittest.TestCase):
 
 @unittest.skipUnless((DATASET / ENTRY / "meta.json").exists(), "数据集条目不存在")
 class FixedInputsTest(unittest.TestCase):
+    def test_inputs_are_identical_across_calls(self):
+        first_batch, first_queries = fixed_inputs(DATASET, ENTRY, 2, torch.device("cpu"))
+        second_batch, second_queries = fixed_inputs(DATASET, ENTRY, 2, torch.device("cpu"))
+        torch.testing.assert_close(first_queries, second_queries)
+        self.assertEqual(set(first_batch), set(second_batch))
+        for key, value in first_batch.items():
+            torch.testing.assert_close(value, second_batch[key])
+
     def test_inputs_are_float32_and_queries_cover_the_strided_lattice(self):
         batch, queries = fixed_inputs(DATASET, ENTRY, 2, torch.device("cpu"))
         for key, value in batch.items():
