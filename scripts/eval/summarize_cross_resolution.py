@@ -21,6 +21,7 @@
 
 import argparse
 import json
+import statistics
 import sys
 from pathlib import Path
 
@@ -171,12 +172,18 @@ def main():
           f"最大差 {max(check['stride1_r2_delta'] for check in checks):.2e}；各 stride 的查询"
           f"点数全部一致：{all(check['query_points_match'] for check in checks)}。")
     devices = sorted({row["device"] for row in latency})
-    spread = max(max(row["sweep_means"][stride]) / min(row["sweep_means"][stride])
-                 for row in latency for stride in STRIDES)
+    deviations = []
+    for row in latency:
+        for stride in STRIDES:
+            means = row["sweep_means"][stride]
+            centre = statistics.median(means)
+            deviations.append(statistics.median([abs(value - centre) for value in means])
+                              / centre)
     print(f"延迟设备 {'；'.join(devices)}；PyTorch {latency[0]['torch']}、CUDA "
           f"{latency[0]['cuda']}；warmup {latency[0]['warmup']}、repeat "
           f"{latency[0]['repeat']}、sweeps {latency[0]['sweeps']}；条目 "
-          f"{latency[0]['entry']}；同一格的轮间极差最大 {100 * (spread - 1):.1f}%。")
+          f"{latency[0]['entry']}；同一格逐轮均值的中位绝对偏差最大 "
+          f"{100 * max(deviations):.2f}%。")
 
     if args.json:
         Path(args.json).write_text(json.dumps(
