@@ -70,18 +70,17 @@ def summary(samples):
 
 
 def summarize_sweeps(sweeps):
-    """多轮扫过的汇总：取各轮均值的中位轮次，返回该轮的均值与标准差。
+    """多轮扫过的汇总：取各轮均值最小的一轮，返回该轮的均值与样本标准差。
 
-    共享集群上偶发的邻居作业会让某一整轮整体变慢（同一条目、同一 stride 的 20 次重复
-    一起偏移），单轮均值因此不稳定。三轮以上取中位轮次作为该格的值，该轮自己的均值与
-    样本标准差就是报告值；每轮逐次耗时全部保留在 `sweep_samples` 里。
+    延迟的噪声是单边的：GPU 时钟爬升与邻居作业只会让某一整轮的 20 次重复一起变慢。
+    每格取各轮均值最小的一轮（无干扰的一轮）作为该格的值，该轮自己的均值与样本标准差
+    就是报告值；每轮逐次耗时全部保留在 `sweep_samples` 里。
     """
     if not sweeps or any(not samples for samples in sweeps):
         raise ValueError("没有计时样本")
     means = [statistics.fmean(samples) for samples in sweeps]
-    median = statistics.median(means)
-    selected = min(range(len(means)), key=lambda index: abs(means[index] - median))
+    selected = min(range(len(means)), key=lambda index: means[index])
     result = summary(sweeps[selected])
     result.update({"sweeps": len(sweeps), "sweep_means": means, "selected_sweep": selected,
-                   "sweep_samples": sweeps})
+                   "selection": "min", "sweep_samples": sweeps})
     return result

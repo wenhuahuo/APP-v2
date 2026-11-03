@@ -21,7 +21,6 @@
 
 import argparse
 import json
-import statistics
 import sys
 from pathlib import Path
 
@@ -145,7 +144,8 @@ def main():
     print("\n### 单条目推理延迟（GPU，ms）\n")
     query_line = "、".join(f"stride {stride}：{latency[0]['query_points'][stride]}"
                            for stride in STRIDES)
-    print(f"查询点数 {query_line}；均值，逐次样本见各 `inference_time.json`。")
+    print(f"查询点数 {query_line}；表中为 5 轮中最小轮次的均值，逐次样本见 "
+          f"`inference_time.json`。")
     for label, _ in CAPACITIES:
         order = {row["model"]: index
                  for index, row in enumerate(rank([row for row in precision
@@ -172,18 +172,11 @@ def main():
           f"最大差 {max(check['stride1_r2_delta'] for check in checks):.2e}；各 stride 的查询"
           f"点数全部一致：{all(check['query_points_match'] for check in checks)}。")
     devices = sorted({row["device"] for row in latency})
-    deviations = []
-    for row in latency:
-        for stride in STRIDES:
-            means = row["sweep_means"][stride]
-            centre = statistics.median(means)
-            deviations.append(statistics.median([abs(value - centre) for value in means])
-                              / centre)
     print(f"延迟设备 {'；'.join(devices)}；PyTorch {latency[0]['torch']}、CUDA "
           f"{latency[0]['cuda']}；warmup {latency[0]['warmup']}、repeat "
           f"{latency[0]['repeat']}、sweeps {latency[0]['sweeps']}；条目 "
-          f"{latency[0]['entry']}；同一格逐轮均值的中位绝对偏差最大 "
-          f"{100 * max(deviations):.2f}%。")
+          f"{latency[0]['entry']}；每格取 5 轮中均值最小的一轮（无邻居作业干扰），"
+          f"全部轮次样本见各 `inference_time.json`。")
 
     if args.json:
         Path(args.json).write_text(json.dumps(

@@ -126,12 +126,13 @@ class LatencyTest(unittest.TestCase):
         self.assertAlmostEqual(result["min"], 0.1, places=12)
         self.assertEqual(summary([0.5])["std"], 0.0)
 
-    def test_median_sweep_is_reported_and_every_sweep_is_kept(self):
-        """邻居作业让某一整轮变慢时，报告的均值/标准差来自中位轮次。"""
-        sweeps = [[0.10, 0.11], [0.30, 0.31], [0.20, 0.21]]
+    def test_fastest_sweep_is_reported_and_every_sweep_is_kept(self):
+        """邻居作业或时钟爬升让某一整轮变慢时，报告的均值/标准差来自最快的一轮。"""
+        sweeps = [[0.20, 0.21], [0.30, 0.31], [0.10, 0.11]]
         result = summarize_sweeps(sweeps)
         self.assertEqual(result["selected_sweep"], 2)
-        self.assertAlmostEqual(result["mean"], 0.205, places=12)
+        self.assertEqual(result["selection"], "min")
+        self.assertAlmostEqual(result["mean"], 0.105, places=12)
         self.assertEqual(result["sweeps"], 3)
         self.assertEqual(result["sweep_means"],
                          [statistics.fmean(sweep) for sweep in sweeps])
