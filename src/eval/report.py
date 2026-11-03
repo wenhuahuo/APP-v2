@@ -6,6 +6,7 @@ R² 以真值的加权方差为基准、上界 1，越高越好；RMSE 与物理
 """
 
 import statistics
+from pathlib import Path
 
 from metrics import FLOW_CHANNELS
 
@@ -21,6 +22,16 @@ COLUMNS = (
 # 前 FLOW_COLUMNS 列对应流场通道（p_rgh 即液面 Cp），最后一列是船面 Cp。
 FLOW_COLUMNS = len(FLOW_CHANNELS)
 CELL = 16
+
+
+def metrics_filename(checkpoint, encode_stride=None):
+    """评测产物的文件名：`metrics_<checkpoint>.json`，固定输入编码时加 `_encode<stride>`。
+
+    固定输入编码的评测与同步抽样评测是两份口径不同的结果，文件名分开因此不会互相
+    覆盖（`metrics_best.json` / `metrics_last.json` 保持训练后那一次评测的内容）。
+    """
+    suffix = "" if encode_stride is None else f"_encode{encode_stride}"
+    return f"metrics_{Path(checkpoint).stem}{suffix}.json"
 
 
 def mean_std(values):

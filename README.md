@@ -57,6 +57,8 @@ python3 scripts/eval/evaluate_model.py \
   --config configs/gino/gino_random_seed0.yaml --encode-stride 2
 
 python3 scripts/eval/profile_model_flops.py
+python3 scripts/eval/measure_inference_time.py   # 18 个 run × stride 1/2/4/8 单条目延迟
+python3 scripts/eval/summarize_cross_resolution.py
 python3 -m pytest tests
 ```
 
