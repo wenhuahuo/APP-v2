@@ -11,7 +11,11 @@
 - 派生配置由 `make_split_configs.py` 按划分定义确定性生成：只替换 `stats`、
   `train.entries`、`train.val_entries` 与头注释，容量超参与基础配置逐项相同（三个划分
   × 两种容量共 54 份都走同一条生成路径，含保留的泛化实验配置）；
-- 全部配置共用单一种子 `seed=0`；
+- 全部配置共用单一种子 `seed=0`；多种子复跑从 `random_seed0` 派生 36 份
+  `<模型>_random_seed0_train_seed{1,2}[_isoflops].yaml`，只改 `train.seed` 与头注释，
+  数据划分、统计量、容量与训练预算逐项不变（文件名同时标注划分与训练种子）；
+- 训练数组脚本用 `TRAIN_SEEDS` 选训练种子：默认 `0` 保持原 9 元素行为，`TRAIN_SEEDS=1,2`
+  展开为 18 个元素（先种子、后模型），由 `--array=0-17%1` 提交；
 - 主表配置都真实生效：模型只输出流场、不构造船面输出头、船体几何与工况都改变
   流场预测、损失只含流场项（`lambda_hull=0.0` 且模型没有 hull 输出域）；
 - 历史 KCS / 消融配置不被默认值静默改写：仍保留双域输出与 `lambda_hull=1.0`。
@@ -57,6 +61,19 @@ HULL_POINTS = 40
 def load(model, split, capacity_suffix=""):
     return yaml.safe_load((CONFIG_DIR / model /
                            f"{model}_{split}{capacity_suffix}.yaml").read_text())
+
+
+# 多种子复跑的训练种子（数据划分固定为 MAIN_SPLIT）
+TRAIN_SEEDS = (1, 2)
+
+
+def seed0_path(model, capacity_suffix=""):
+    return CONFIG_DIR / model / f"{model}_{MAIN_SPLIT}{capacity_suffix}.yaml"
+
+
+def multiseed_path(model, train_seed, capacity_suffix=""):
+    return (CONFIG_DIR / model /
+            f"{model}_{MAIN_SPLIT}_train_seed{train_seed}{capacity_suffix}.yaml")
 
 
 def splits_definition():
@@ -205,6 +222,47 @@ class MainConfigTest(unittest.TestCase):
         self.assertIn("CAPACITY_SUFFIX=\"_isoflops\"", text)
         models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
         self.assertEqual(tuple(models_block.split()), MODELS)
+
+    def test_multiseed_configs_only_change_the_training_seed(self):
+        """36 份多种子配置：划分、统计量、容量与训练预算与 seed0 逐项一致，只改 train.seed。"""
+        for _, capacity_suffix in CAPACITIES:
+            for model in MODELS:
+                base = yaml.safe_load(seed0_path(model, capacity_suffix).read_text())
+                for train_seed in TRAIN_SEEDS:
+                    with self.subTest(model=model, capacity=capacity_suffix, seed=train_seed):
+                        path = multiseed_path(model, train_seed, capacity_suffix)
+                        config = yaml.safe_load(path.read_text())
+                        self.assertEqual(config["train"]["seed"], train_seed)
+                        self.assertEqual(config["stats"], base["stats"])
+                        self.assertEqual(config.get("model"), base.get("model"))
+                        for key, value in base["train"].items():
+                            if key != "seed":
+                                self.assertEqual(config["train"][key], value, key)
+                        self.assertIn(f"训练种子 {train_seed}", path.read_text().splitlines()[0])
+
+    def test_multiseed_configs_match_the_generator(self):
+        """派生幂等：多种子配置由 seed0 配置确定生成，文件名区分划分与训练种子。"""
+        for _, capacity_suffix in CAPACITIES:
+            for model in MODELS:
+                base_path = seed0_path(model, capacity_suffix)
+                for train_seed in TRAIN_SEEDS:
+                    with self.subTest(model=model, capacity=capacity_suffix, seed=train_seed):
+                        path = multiseed_path(model, train_seed, capacity_suffix)
+                        self.assertEqual(
+                            path.name,
+                            make_split_configs.train_seed_output_name(base_path, train_seed))
+                        self.assertEqual(path.read_text(),
+                                         make_split_configs.derive_train_seed(base_path, train_seed))
+
+    def test_sbatch_multiseed_arrays_cover_two_training_seeds(self):
+        """多种子入口：TRAIN_SEEDS 选训练种子，两组各 18 个元素（先种子、后模型）。"""
+        text = SBATCH.read_text()
+        self.assertIn('TRAIN_SEEDS="${TRAIN_SEEDS:-0}"', text)
+        self.assertIn("_train_seed${TRAIN_SEED}", text)
+        self.assertIn("--array=0-17%1", text)
+        self.assertIn("SLURM_ARRAY_TASK_COUNT", text)
+        for job in ("main-fixed-parameters-multiseed", "main-fixed-gflops-multiseed"):
+            self.assertIn(job, text)
 
     def test_historical_configs_keep_legacy_semantics(self):
         """KCS 与消融配置保留双域输出与 lambda_hull=1.0，不被默认值改写。"""

@@ -1,4 +1,5 @@
-"""按 `configs/splits_multihull.json` 从主实验基础配置派生三个划分的配置。
+"""按 `configs/splits_multihull.json` 从主实验基础配置派生三个划分的配置，
+并从 `random_seed0` 派生多种子复跑配置。
 
     python3 scripts/train/make_split_configs.py
 
@@ -11,6 +12,17 @@
 训练集拟合的统计量），外加开头一行头注释。模型结构、容量超参、任务口径与优化超参与
 基础配置完全一致（双域输入、仅流场输出、逐层 FiLM、`lambda_hull=0.0`），因此同一
 容量口径下的 9 个模型是同口径对照，两种容量口径之间的差别只有主容量。
+
+多种子复跑以 `random_seed0` 的 18 份配置为基准再派生 36 份（9 模型 × 2 种容量 ×
+训练种子 1、2）：
+
+- 固定参数量：`<模型>_random_seed0.yaml` → `<模型>_random_seed0_train_seed<S>.yaml`
+- 固定计算量：`<模型>_random_seed0_isoflops.yaml` →
+  `<模型>_random_seed0_train_seed<S>_isoflops.yaml`
+
+数据划分始终是 `random_seed0`（同一份 `stats_random_seed0.json`、同样的 190/34 条目），
+文件名里 `random_seed0` 与 `train_seed<S>` 分别标注「数据划分」与「训练种子」；派生
+配置只改 `train.seed` 与头注释，容量、训练预算与划分逐项不变。
 """
 
 import json
@@ -25,6 +37,16 @@ CAPACITY_PROTOCOLS = {
     "_multihull_normal": "固定参数量",
     "_multihull_isoflops": "固定计算量（iso-FLOPs）",
 }
+# 主实验的 9 个模型（主表顺序，配置目录同名）
+MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
+          "transolver", "oformer", "gino", "coral")
+# 多种子复跑：数据划分固定为 MAIN_SPLIT，只换训练种子
+MAIN_SPLIT = "random_seed0"
+TRAIN_SEEDS = (1, 2)
+# (MAIN_SPLIT 配置的容量后缀, 派生配置的附加后缀, 容量口径描述)
+SPLIT_CAPACITIES = ((f"_{MAIN_SPLIT}", "", CAPACITY_PROTOCOLS["_multihull_normal"]),
+                    (f"_{MAIN_SPLIT}_isoflops", "_isoflops",
+                     CAPACITY_PROTOCOLS["_multihull_isoflops"]))
 
 
 def bullet(items, indent="  - "):
@@ -64,6 +86,42 @@ def output_name(base_path, split_name):
     return f"{model}_{split_name}{extra}.yaml"
 
 
+def split_capacity(base_path):
+    """返回 `(MAIN_SPLIT 容量后缀, 附加后缀, 容量口径描述)`；基准配置必须是 MAIN_SPLIT 的。"""
+    stem = Path(base_path).stem
+    return next(capacity for capacity in SPLIT_CAPACITIES if stem.endswith(capacity[0]))
+
+
+def derive_train_seed(base_path, train_seed):
+    """返回 `base_path` 在训练种子 `train_seed` 下的派生配置全文（纯函数）。
+
+    只改 `train.seed` 与头注释：数据划分、统计量、容量与训练预算逐项沿用基准配置。
+    """
+    base_path = Path(base_path)
+    train_seed = int(train_seed)
+    lines = base_path.read_text().splitlines(keepends=True)
+    if not lines or not lines[0].startswith("#"):
+        raise RuntimeError(f"{base_path.name} 缺少头注释")
+    text, hits = re.subn(r"^  seed: \d+$", f"  seed: {train_seed}", "".join(lines[1:]),
+                         count=1, flags=re.M)
+    if hits != 1:
+        raise RuntimeError(f"{base_path.name} 的 train.seed 命中 {hits} 次")
+    protocol = split_capacity(base_path)[2]
+    # 头注释沿用基准配置的划分说明（划分与条目数不变），插入训练种子
+    split_header = lines[0].rstrip("\n").split("；")[0]
+    header = (f"{split_header}；训练种子 {train_seed}（数据划分仍为 {MAIN_SPLIT}）；"
+              f"{protocol}容量，其余超参与 {base_path.name} 一致\n")
+    return header + text
+
+
+def train_seed_output_name(base_path, train_seed):
+    """`<模型>_random_seed0[_isoflops].yaml` → `<模型>_random_seed0_train_seed<S>[_isoflops].yaml`。"""
+    stem = Path(base_path).stem
+    suffix, extra, _ = split_capacity(base_path)
+    model = stem[: -len(suffix)]
+    return f"{model}_{MAIN_SPLIT}_train_seed{int(train_seed)}{extra}.yaml"
+
+
 def main():
     splits = {k: v for k, v in json.loads((CONFIG_DIR / "splits_multihull.json").read_text()).items()
               if not k.startswith("_")}
@@ -76,6 +134,16 @@ def main():
                 out = base.parent / output_name(base, name)
                 out.write_text(derive(base, name, split))
                 print(f"{out.name}: train {len(split['train'])} / val {len(split['val'])}")
+    # 多种子复跑：从 random_seed0 的 18 份配置派生，数据划分与统计量保持不变
+    for capacity_suffix, _, _ in SPLIT_CAPACITIES:
+        for model in MODELS:
+            base = CONFIG_DIR / model / f"{model}{capacity_suffix}.yaml"
+            if not base.is_file():
+                raise RuntimeError(f"缺少 {MAIN_SPLIT} 基准配置 {base}")
+            for train_seed in TRAIN_SEEDS:
+                out = base.parent / train_seed_output_name(base, train_seed)
+                out.write_text(derive_train_seed(base, train_seed))
+                print(f"{out.name}: train.seed {train_seed}，划分 {MAIN_SPLIT}")
 
 
 if __name__ == "__main__":
