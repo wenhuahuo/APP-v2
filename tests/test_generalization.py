@@ -5,7 +5,7 @@
 - 两个留出划分各 5 个模型 × 训练种子 0/1/2：seed 0 复用既有的 `*_<划分>_isoflops.yaml`，
   seed 1/2 由 `make_split_configs.py` 从 seed 0 确定性派生，文件名区分划分与训练种子；
 - 派生配置只改 `train.seed` 与头注释：划分条目、`stats`、容量与训练预算逐项沿用 seed 0；
-- 划分语义取 `configs/splits_multihull.json` 的既定定义（218/6 与 55/169），统计量指向
+- 划分语义取 `configs/splits_multihull.json` 的既定定义（218/6 与 213/11），统计量指向
   同一划分训练集拟合的 `stats_<划分>.json`，三个种子共用；
 - 两个数组作业各 15 个元素、`%1`，元素与配置一一对应（每个模型三个训练种子连续排列）。
 """
@@ -85,9 +85,9 @@ class GeneralizationConfigTest(unittest.TestCase):
                             make_split_configs.derive_train_seed(base_path, train_seed, split))
 
     def test_configs_follow_the_shared_split_definition(self):
-        """条目与统计量取既定划分：218/6 留出 KVLCC2、55/169 留出设计 Fr。"""
+        """条目与统计量取既定划分：218/6 留出 KVLCC2、213/11 只留出经典船型设计 Fr。"""
         definitions = splits_definition()
-        for split, (n_train, n_val) in zip(SPLITS, ((218, 6), (55, 169))):
+        for split, (n_train, n_val) in zip(SPLITS, ((218, 6), (213, 11))):
             definition = definitions[split]
             self.assertEqual(len(definition["train"]), n_train)
             self.assertEqual(len(definition["val"]), n_val)

@@ -5,8 +5,8 @@
 - 生成器只依赖当前快照的元数据（`index.json` + `meta.json`），同一批元数据必然给出
   同一份划分，且不依赖外部数据集仓库的算例配置；
 - 三个划分都满足「train/val 互不重叠 + 恰好覆盖全部 normal_mesh 条目」；
-- `lofo_fr_design` 整档留出设计 Fr，`loto_kvlcc2` 整船型留出 kvlcc2，
-  `random_seed0` 保持 `RandomState(0)` 抽 15% 的既定语义；
+- `lofo_fr_design` 只留出 11 个经典船型的设计 Fr（融合船型条目全部进训练集），
+  `loto_kvlcc2` 整船型留出 kvlcc2，`random_seed0` 保持 `RandomState(0)` 抽 15% 的既定语义；
 - 提交的划分文件与生成规则一致（含随机划分可从条目全集重算）。
 """
 
@@ -137,21 +137,22 @@ class SplitRowsTest(unittest.TestCase):
                 self.assertEqual(self.splits[name]["counts"],
                                  {"train": len(train), "val": len(val)})
 
-    def test_lofo_holds_out_the_whole_design_fr_tier(self):
+    def test_lofo_holds_out_only_the_classic_design_fr_cases(self):
         split = self.splits["lofo_fr_design"]
         hull_of = {entry: hull for entry, hull, _ in self.rows}
         # 档位（Fr / 设计 Fr）才是留出的单位；不同船型的 Fr 数值可能碰巧相等，
         # 例如融合船型的设计 Fr 会落在某经典船型的非设计 Fr 上（真实快照同样存在）。
         scales = make_splits.fr_scales(self.rows, DESIGN_FRS)
         self.assertEqual({scales[entry] for entry in split["val"]}, {DESIGN_FR_SCALE})
-        self.assertNotIn(DESIGN_FR_SCALE, {scales[entry] for entry in split["train"]})
-        self.assertEqual({scales[entry] for entry in split["train"]},
+        self.assertEqual({hull_of[entry] for entry in split["val"]}, set(CLASSIC_HULLS))
+        self.assertEqual(len(split["val"]), len(CLASSIC_HULLS))
+        # 训练集：经典船型的非设计 Fr + 全部融合船型（融合船型只有设计 Fr 一个工况）
+        classic_train = [entry for entry in split["train"]
+                         if hull_of[entry] in CLASSIC_HULLS]
+        self.assertEqual({scales[entry] for entry in classic_train},
                          set(CLASSIC_SCALES) - {DESIGN_FR_SCALE})
-        # 留出集覆盖全部经典船型（11 条设计工况）与全部融合船型
-        self.assertEqual(len(split["val"]), len(CLASSIC_HULLS) + len(fusion_hulls))
-        self.assertEqual({hull_of[entry] for entry in split["val"]},
-                         set(CLASSIC_HULLS) | fusion_hulls)
-        self.assertEqual({hull_of[entry] for entry in split["train"]}, set(CLASSIC_HULLS))
+        self.assertEqual({hull_of[entry] for entry in split["train"]} - set(CLASSIC_HULLS),
+                         fusion_hulls)
 
     def test_loto_holds_out_one_whole_hull(self):
         split = self.splits["loto_kvlcc2"]
@@ -200,7 +201,7 @@ class CommittedSplitTest(unittest.TestCase):
         self.assertEqual(len(self.universe), 224)
         self.assertEqual(self.splits["random_seed0"]["counts"], {"train": 190, "val": 34})
         self.assertEqual(self.splits["loto_kvlcc2"]["counts"], {"train": 218, "val": 6})
-        self.assertEqual(self.splits["lofo_fr_design"]["counts"], {"train": 55, "val": 169})
+        self.assertEqual(self.splits["lofo_fr_design"]["counts"], {"train": 213, "val": 11})
 
     def test_random_split_is_the_documented_permutation(self):
         entries = sorted(self.universe)
@@ -217,15 +218,18 @@ class CommittedSplitTest(unittest.TestCase):
         self.assertFalse(any(is_heldout_hull.match(entry)
                              for entry in self.splits["loto_kvlcc2"]["train"]))
 
-    def test_lofo_train_keeps_only_classic_non_design_cases(self):
+    def test_lofo_train_keeps_all_fusion_and_classic_non_design_cases(self):
         split = self.splits["lofo_fr_design"]
-        self.assertEqual(len(split["train"]), 55)
-        self.assertFalse(any("_w025_" in entry or "_w050_" in entry or "_w075_" in entry
-                             for entry in split["train"]))
-        classic_val = [entry for entry in split["val"]
-                       if not any(f"_w{weight:03d}_" in entry
-                                  for weight in make_splits.FUSION_WEIGHTS)]
-        self.assertEqual(len(classic_val), len(CLASSIC_HULLS))
+        fusion = re.compile(r"_w(?:025|050|075)_")
+        # 留出集：11 条经典船型设计工况，不含任何融合船型
+        self.assertEqual(len(split["val"]), len(CLASSIC_HULLS))
+        self.assertEqual(len({entry.split("_fr")[0] for entry in split["val"]}),
+                         len(CLASSIC_HULLS))
+        self.assertFalse(any(fusion.search(entry) for entry in split["val"]))
+        # 训练集：158 条融合船型 + 55 条经典船型非设计 Fr
+        self.assertEqual(len(split["train"]), 213)
+        self.assertEqual(sum(1 for entry in split["train"] if fusion.search(entry)), 158)
+        self.assertEqual(sum(1 for entry in split["train"] if not fusion.search(entry)), 55)
 
     def test_conditioning_ablation_split_follows_the_shared_snapshot(self):
         train, val = lofo_fr_classic_split()

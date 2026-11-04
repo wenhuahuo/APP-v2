@@ -20,8 +20,9 @@
 
     random_seed0    RandomState(0) 抽 15% 作留出集，其余训练
     loto_kvlcc2     整船型留出 kvlcc2 的全部 Fr 工况
-    lofo_fr_design  整档留出设计 Fr（`fr_scale = 1.0`）：经典船型设计工况 +
-                    全部融合船型工况（融合船型只有其设计 Fr 一个工况）
+    lofo_fr_design  只把 11 个经典船型的设计 Fr 工况（`fr_scale = 1.0`）作为留出集；
+                    训练集为 55 条经典船型非设计 Fr 条目 + 全部 158 条融合船型条目
+                    （融合船型只有设计 Fr 一个工况，因此进训练集）
 
 每个划分都校验 train/val 互不重叠、二者恰好覆盖快照全部条目，并校验留出语义。
 """
@@ -175,10 +176,14 @@ def validate_split(name, rows, scales, split):
     if name == "lofo_fr_design":
         if {scales[e] for e in val} != {DESIGN_FR_SCALE}:
             raise ValueError(f"{name}: 留出集不是整档设计 Fr")
-        if DESIGN_FR_SCALE in {scales[e] for e in train}:
-            raise ValueError(f"{name}: 训练集混入了设计 Fr 条目")
-        if len({hull_of[e] for e in val}) < len(CLASSIC_HULLS):
-            raise ValueError(f"{name}: 留出集未覆盖全部经典船型")
+        classic_train = [e for e in train if hull_of[e] in CLASSIC_HULLS]
+        if DESIGN_FR_SCALE in {scales[e] for e in classic_train}:
+            raise ValueError(f"{name}: 经典船型训练集混入了设计 Fr 条目")
+        # 留出集恰为 11 个经典船型的设计工况；融合船型只有设计 Fr 一个工况，全部进训练集
+        if {hull_of[e] for e in val} != set(CLASSIC_HULLS):
+            raise ValueError(f"{name}: 留出集不是 {len(CLASSIC_HULLS)} 个经典船型")
+        if {hull_of[e] for e in train} == set(CLASSIC_HULLS):
+            raise ValueError(f"{name}: 训练集只含经典船型，缺少融合船型条目")
     elif name == "loto_kvlcc2":
         if {hull_of[e] for e in val} != {HOLDOUT_HULL}:
             raise ValueError(f"{name}: 留出集不止 {HOLDOUT_HULL} 船型")
@@ -200,8 +205,9 @@ def split_rows(rows):
     scales = fr_scales(rows, design_frs)
 
     holdout_hull = [entry for entry, hull, _ in rows if hull == HOLDOUT_HULL]
-    holdout_fr = [entry for entry, _, _ in rows
-                  if scales[entry] == DESIGN_FR_SCALE]
+    # lofo 只留出经典船型的设计 Fr；融合船型（只有设计 Fr 工况）全部留在训练集
+    holdout_fr = [entry for entry, hull, _ in rows
+                  if hull in CLASSIC_HULLS and scales[entry] == DESIGN_FR_SCALE]
     n_random = round(RANDOM_FRACTION * len(rows))
     order = np.random.RandomState(RANDOM_SEED).permutation(len(rows))[:n_random]
     holdout_random = sorted(entries[index] for index in order)
@@ -215,7 +221,7 @@ def split_rows(rows):
         },
         "lofo_fr_design": {
             "protocol": "leave_one_fr_scale_out",
-            "holdout": f"fr_scale={DESIGN_FR_SCALE}（设计 Fr）",
+            "holdout": f"fr_scale={DESIGN_FR_SCALE}（11 个经典船型设计 Fr）",
             "train": sorted(set(entries) - set(holdout_fr)),
             "val": sorted(holdout_fr),
         },

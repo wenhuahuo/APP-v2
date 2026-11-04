@@ -24,7 +24,7 @@ for name in ("eval",):
 from aggregate import eta_rmse_mm, overall  # noqa: E402
 
 # (划分名, 训练条目数, 留出条目数)
-TASKS = (("loto_kvlcc2", 218, 6), ("lofo_fr_design", 55, 169))
+TASKS = (("loto_kvlcc2", 218, 6), ("lofo_fr_design", 213, 11))
 # 本轮 5 个模型（模型目录, 报告名）
 MODELS = (("appsolver_oformer", "APP+OFormer"), ("transolver", "Transolver"),
           ("appsolver_v2", "APPSolver-v2"), ("gnot", "GNOT"), ("oformer", "OFormer"))
