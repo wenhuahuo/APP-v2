@@ -23,6 +23,13 @@
 数据划分始终是 `random_seed0`（同一份 `stats_random_seed0.json`、同样的 190/34 条目），
 文件名里 `random_seed0` 与 `train_seed<S>` 分别标注「数据划分」与「训练种子」；派生
 配置只改 `train.seed` 与头注释，容量、训练预算与划分逐项不变。
+
+泛化实验沿用同一条派生路径：两个留出划分的固定计算量配置再派生训练种子 1、2，共 20 份
+（5 模型 × 2 划分 × 2 种子）：
+
+- `<模型>_loto_kvlcc2_isoflops.yaml` → `<模型>_loto_kvlcc2_train_seed<S>_isoflops.yaml`
+- `<模型>_lofo_fr_design_isoflops.yaml` →
+  `<模型>_lofo_fr_design_train_seed<S>_isoflops.yaml`
 """
 
 import json
@@ -43,10 +50,12 @@ MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
 # 多种子复跑：数据划分固定为 MAIN_SPLIT，只换训练种子
 MAIN_SPLIT = "random_seed0"
 TRAIN_SEEDS = (1, 2)
-# (MAIN_SPLIT 配置的容量后缀, 派生配置的附加后缀, 容量口径描述)
-SPLIT_CAPACITIES = ((f"_{MAIN_SPLIT}", "", CAPACITY_PROTOCOLS["_multihull_normal"]),
-                    (f"_{MAIN_SPLIT}_isoflops", "_isoflops",
-                     CAPACITY_PROTOCOLS["_multihull_isoflops"]))
+# 派生配置的附加容量后缀 -> 容量口径描述
+DERIVED_PROTOCOLS = {"": CAPACITY_PROTOCOLS["_multihull_normal"],
+                     "_isoflops": CAPACITY_PROTOCOLS["_multihull_isoflops"]}
+# 泛化实验：两个留出划分、5 个模型，只派生固定计算量容量
+GENERALIZATION_SPLITS = ("loto_kvlcc2", "lofo_fr_design")
+GENERALIZATION_MODELS = ("appsolver_oformer", "transolver", "appsolver_v2", "gnot", "oformer")
 
 
 def bullet(items, indent="  - "):
@@ -86,22 +95,25 @@ def output_name(base_path, split_name):
     return f"{model}_{split_name}{extra}.yaml"
 
 
-def split_capacity(base_path):
-    """返回 `(MAIN_SPLIT 容量后缀, 附加后缀, 容量口径描述)`；基准配置必须是 MAIN_SPLIT 的。"""
-    stem = Path(base_path).stem
-    return next(capacity for capacity in SPLIT_CAPACITIES if stem.endswith(capacity[0]))
+def split_capacity(base_name, split_name=MAIN_SPLIT):
+    """返回 `<模型>_<划分>[_isoflops]` 的附加容量后缀，并校验文件名属于该划分。"""
+    head, sep, extra = Path(base_name).stem.partition(f"_{split_name}")
+    if not head or not sep or extra not in DERIVED_PROTOCOLS:
+        raise RuntimeError(f"{base_name} 不是划分 {split_name} 的派生配置")
+    return extra
 
 
-def derive_train_seed(base_path, train_seed):
+def derive_train_seed(base_path, train_seed, split_name=MAIN_SPLIT):
     """返回 `base_path` 在训练种子 `train_seed` 下的派生配置全文（纯函数）。
 
     只改 `train.seed` 与头注释：数据划分、统计量、容量与训练预算逐项沿用基准配置。
     """
     base_path = Path(base_path)
-    return derive_train_seed_from_text(base_path.read_text(), base_path.name, train_seed)
+    return derive_train_seed_from_text(base_path.read_text(), base_path.name, train_seed,
+                                       split_name)
 
 
-def derive_train_seed_from_text(base_text, base_name, train_seed):
+def derive_train_seed_from_text(base_text, base_name, train_seed, split_name=MAIN_SPLIT):
     """同 `derive_train_seed`，输入是配置全文与文件名，供尚未落盘的派生配置使用。"""
     train_seed = int(train_seed)
     lines = base_text.splitlines(keepends=True)
@@ -111,20 +123,20 @@ def derive_train_seed_from_text(base_text, base_name, train_seed):
                          count=1, flags=re.M)
     if hits != 1:
         raise RuntimeError(f"{base_name} 的 train.seed 命中 {hits} 次")
-    protocol = split_capacity(Path(base_name))[2]
+    protocol = DERIVED_PROTOCOLS[split_capacity(base_name, split_name)]
     # 头注释沿用基准配置的划分说明（划分与条目数不变），插入训练种子
     split_header = lines[0].rstrip("\n").split("；")[0]
-    header = (f"{split_header}；训练种子 {train_seed}（数据划分仍为 {MAIN_SPLIT}）；"
+    header = (f"{split_header}；训练种子 {train_seed}（数据划分仍为 {split_name}）；"
               f"{protocol}容量，其余超参与 {base_name} 一致\n")
     return header + text
 
 
-def train_seed_output_name(base_path, train_seed):
-    """`<模型>_random_seed0[_isoflops].yaml` → `<模型>_random_seed0_train_seed<S>[_isoflops].yaml`。"""
+def train_seed_output_name(base_path, train_seed, split_name=MAIN_SPLIT):
+    """`<模型>_<划分>[_isoflops].yaml` → `<模型>_<划分>_train_seed<S>[_isoflops].yaml`。"""
     stem = Path(base_path).stem
-    suffix, extra, _ = split_capacity(base_path)
-    model = stem[: -len(suffix)]
-    return f"{model}_{MAIN_SPLIT}_train_seed{int(train_seed)}{extra}.yaml"
+    extra = split_capacity(base_path, split_name)
+    model = stem[: -len(f"_{split_name}{extra}")]
+    return f"{model}_{split_name}_train_seed{int(train_seed)}{extra}.yaml"
 
 
 def main():
@@ -140,15 +152,25 @@ def main():
                 out.write_text(derive(base, name, split))
                 print(f"{out.name}: train {len(split['train'])} / val {len(split['val'])}")
     # 多种子复跑：从 random_seed0 的 18 份配置派生，数据划分与统计量保持不变
-    for capacity_suffix, _, _ in SPLIT_CAPACITIES:
+    for capacity_suffix in ("", "_isoflops"):
         for model in MODELS:
-            base = CONFIG_DIR / model / f"{model}{capacity_suffix}.yaml"
+            base = CONFIG_DIR / model / f"{model}_{MAIN_SPLIT}{capacity_suffix}.yaml"
             if not base.is_file():
                 raise RuntimeError(f"缺少 {MAIN_SPLIT} 基准配置 {base}")
             for train_seed in TRAIN_SEEDS:
                 out = base.parent / train_seed_output_name(base, train_seed)
                 out.write_text(derive_train_seed(base, train_seed))
                 print(f"{out.name}: train.seed {train_seed}，划分 {MAIN_SPLIT}")
+    # 泛化实验：两个留出划分的固定计算量配置补训练种子 1、2，划分与统计量不变
+    for split_name in GENERALIZATION_SPLITS:
+        for model in GENERALIZATION_MODELS:
+            base = CONFIG_DIR / model / f"{model}_{split_name}_isoflops.yaml"
+            if not base.is_file():
+                raise RuntimeError(f"缺少 {split_name} 基准配置 {base}")
+            for train_seed in TRAIN_SEEDS:
+                out = base.parent / train_seed_output_name(base, train_seed, split_name)
+                out.write_text(derive_train_seed(base, train_seed, split_name))
+                print(f"{out.name}: train.seed {train_seed}，划分 {split_name}")
 
 
 if __name__ == "__main__":
