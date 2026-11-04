@@ -76,7 +76,11 @@ class FourierAdd(nn.Module):
 
 
 class ConditionCrossAttention(nn.Module):
-    """对单个工况嵌入做交叉注意力，以零初始化标量门控接入残差路径。"""
+    """对单个工况嵌入做交叉注意力，以零初始化标量门控接入残差路径。
+
+    token 可以是 `(B, N, d)`，也可以是不带 batch 维的 `(N, d)`（APP+OFormer 的
+    patch token 序列就是后一种）；后者按 `B = 1` 处理并原样返回形状。
+    """
 
     def __init__(self, condition_dim, d_model, nhead, dropout=0.0):
         super().__init__()
@@ -87,10 +91,13 @@ class ConditionCrossAttention(nn.Module):
         self.gate = nn.Parameter(torch.zeros(1))
 
     def forward(self, tokens, condition):
+        unbatched = tokens.dim() == 2
+        tokens = tokens[None] if unbatched else tokens
         context = self.condition(condition)[:, None]
         attended = self.attention(self.norm(tokens), context, context,
                                   need_weights=False)[0]
-        return tokens + torch.tanh(self.gate) * attended
+        tokens = tokens + torch.tanh(self.gate) * attended
+        return tokens[0] if unbatched else tokens
 
 
 def make_conditioning(kind, condition_dim, d_model):
@@ -117,3 +124,48 @@ def modulate(x, branch):
 def gate_residual(residual, branch):
     """adaLN-Zero 的逐分支门控 `α ⊙ residual`；`adaln` 无门控，原样返回。"""
     return residual if len(branch) == 2 else residual * branch[2][:, None]
+
+
+class ConditionedBlock(nn.Module):
+    """块内工况融合的公共部件：调制模块与（可选的）条件交叉注意力。
+
+    `conditioning` 为 `None` 时保持历史口径的「块内不调制」（由整模型的工况加性偏置
+    负责），因此 `None` 与 `none` 在块内行为相同，但两者是否带偏置由模型决定。
+    """
+
+    def __init__(self, conditioning, condition_dim, d_model, nhead=None, dropout=0.0):
+        super().__init__()
+        self.kind = conditioning
+        self.modulation = make_conditioning("none" if conditioning is None else conditioning,
+                                            condition_dim, d_model)
+        self.condition_cross = (ConditionCrossAttention(condition_dim, d_model, nhead, dropout)
+                                if conditioning == "cond_xattn" else None)
+
+
+def fused_block(x, condition, block, norm_attention, attend, norm_mlp, mlp):
+    """带工况融合的预归一化残差块，返回 `x + 注意力分支 + MLP 分支`。
+
+    `block` 给出 `kind` / `modulation` / `condition_cross`（即 `ConditionedBlock`），
+    `attend` 与 `mlp` 接收归一化（并按需调制）后的张量并返回残差分支输出，由调用方
+    绑定各自的注意力与 MLP 模块。APPSolver-v2 与 OFormer 主干共用这一套公式。
+    """
+    if block.kind in {None, "none", "cond_token", "cond_xattn", "fourier_add"}:
+        if block.kind == "fourier_add":
+            x = x + block.modulation(condition)
+        x = x + attend(norm_attention(x))
+        if block.condition_cross is not None:
+            x = block.condition_cross(x, condition)
+        return x + mlp(norm_mlp(x))
+
+    branch = block.modulation(condition)
+    if block.kind == "film":
+        gamma, beta = branch
+        x = x * (1.0 + gamma[:, None]) + beta[:, None]
+        x = x + attend(norm_attention(x))
+        return x + mlp(norm_mlp(x))
+
+    attention_branch, mlp_branch = branch
+    residual = attend(modulate(norm_attention(x), attention_branch))
+    x = x + gate_residual(residual, attention_branch)
+    residual = mlp(modulate(norm_mlp(x), mlp_branch))
+    return x + gate_residual(residual, mlp_branch)

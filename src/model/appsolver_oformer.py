@@ -6,18 +6,28 @@ OFormer 基线保留每个输入点做线性注意力；这里只把输入换成
 差别只有「逐点」与「APP 分词」这一项。
 
 给出 `input_domains` 时流场与船面的 patch token 用各自的线性投影加域标识后拼进同一
-个编码器（与 APPSolver-v2 的双域口径一致，船体几何因此进入流场预测），`conditioning:
-film` 在编码/解码 block 入口做逐层 FiLM；缺省时保持历史口径的独立编码与工况加性偏置。
-`input_domains` 只给出一个域时（船体融合消融的 `flow_only`）只拼该域 token，另一域的
-分词与投影不参与前向。
+个编码器（与 APPSolver-v2 的双域口径一致，船体几何因此进入流场预测）。`conditioning`
+可以是 `none` / `film` / `adaln` / `adaln_zero` / `fourier_add` / `cond_token` /
+`cond_xattn`：块内融合由 `src/model/conditioning.py` 的同一套公式完成，`cond_token`
+在拼接后的 token 序列头部加一个零位置的工况上下文 token；缺省时保持历史口径的
+独立编码与工况加性偏置。`input_domains` 只给出一个域时（船体融合消融的 `flow_only`）
+只拼该域 token，另一域的分词与投影不参与前向。
+
+流场分词方法由 `flow_tokenizer` 选择：`adaptive` 用 `flow_size_tiers` 的 SDF 分档，
+`uniform` 用固定物理边长 `flow_uniform_size`，`learned` 用 `LearnedTokenizer` 的
+Transolver 式软分配（每样本 `flow_learned_tokens` 个 token）。两者与 APPSolver-v2
+共用同一实现，船体分词与查询解码不随分词方法改变。
 """
 
 import torch
 import torch.nn as nn
 
+from learned_tokenizer import LearnedTokenizer
 from oformer import DecoderBlock, EncoderBlock, GaussianFourierFeatures, Propagator
 from point_cloud import ConditionBias
 from tokenizer import flow_tokens, hull_tokens
+
+FLOW_TOKENIZERS = ("adaptive", "uniform", "learned")
 
 
 class APPSolverOFormer(nn.Module):
@@ -27,7 +37,8 @@ class APPSolverOFormer(nn.Module):
                  decoder_layers=2, mlp_ratio=4.0, propagator_layers=3, fourier_scale=8.0,
                  rotary_min_freq=0.25, rotary_scale=16.0, dropout=0.0, condition_dim=2,
                  flow_channels=5, hull_channels=1, max_level=12, input_domains=None,
-                 output_domains=None, conditioning=None):
+                 output_domains=None, conditioning=None, flow_tokenizer="adaptive",
+                 flow_uniform_size=0.1, flow_learned_tokens=512):
         super().__init__()
         self.input_domains = tuple(input_domains) if input_domains else ("flow", "hull")
         self.output_domains = tuple(output_domains) if output_domains else ("flow", "hull")
@@ -35,9 +46,21 @@ class APPSolverOFormer(nn.Module):
         self.flow_size_tiers = flow_size_tiers
         self.hull_size = hull_size
         self.max_level = max_level
+        self.flow_tokenizer = flow_tokenizer
+        self.flow_uniform_size = flow_uniform_size
+        if flow_tokenizer not in FLOW_TOKENIZERS:
+            raise ValueError(f"未知流场分词方法: {flow_tokenizer}（可选 "
+                             f"{' / '.join(FLOW_TOKENIZERS)}）")
         self.flow_input = nn.Linear(2, d_model)
         self.hull_input = nn.Linear(8, d_model)
+        self.learned_flow = (LearnedTokenizer(2, d_model, flow_learned_tokens)
+                             if "flow" in self.input_domains and flow_tokenizer == "learned"
+                             else None)
         self.domain = nn.Embedding(2, d_model) if self.joint else None
+        self.condition_token = (nn.Linear(condition_dim, d_model)
+                                if conditioning == "cond_token" else None)
+        self.condition_domain = (nn.Parameter(torch.zeros(d_model))
+                                 if conditioning == "cond_token" else None)
         self.condition = ConditionBias(condition_dim, d_model) if conditioning is None else None
         self.encoder = nn.ModuleList([
             EncoderBlock(d_model, nhead, mlp_ratio, rotary_min_freq, rotary_scale, dropout,
@@ -73,12 +96,39 @@ class APPSolverOFormer(nn.Module):
         return queries
 
     def _patches(self, batch, index=0):
-        """按 `input_domains` 分词；未启用的输入域不构造 token。"""
-        flow = (flow_tokens(batch, index, self.flow_size_tiers, self.max_level)
-                if "flow" in self.input_domains else None)
+        """按 `input_domains` 分词；未启用的输入域不构造 token。
+
+        硬分词在 CPU 上完成（几何分区不参与梯度）；学习分词在参数所在设备上做
+        软分配，与 APPSolver-v2 的 `_learned_flow_tokens` 同一口径。
+        """
+        flow = None
+        if "flow" in self.input_domains:
+            if self.flow_tokenizer == "learned":
+                flow = self._learned_flow_tokens(batch, index)
+            else:
+                tiers = (self.flow_size_tiers if self.flow_tokenizer == "adaptive"
+                         else [[None, self.flow_uniform_size]])
+                flow = flow_tokens(batch, index, tiers, self.max_level)
         hull = (hull_tokens(batch, index, self.hull_size, self.max_level)
                 if "hull" in self.input_domains else None)
         return flow, hull
+
+    def _learned_flow_tokens(self, batch, index):
+        device = self.learned_flow.token_embed.device
+        mask = batch["flow_mask"][index].to(device).reshape(-1)
+        features = batch["flow_coords"][index].to(device).reshape(-1, 2)[mask]
+        weights = batch["flow_weight"][index].to(device).reshape(-1)[mask]
+        return self.learned_flow(features, weights)
+
+    def _add_condition_token(self, tokens, centres, condition):
+        """`cond_token`：在 token 序列头部加一个零位置的工况上下文 token。
+
+        `tokens (P, d)` 与 `centres (P, 2)` 都是单条目形状（批大小固定为 1），
+        与 `_joint` 的输出一致。
+        """
+        token = self.condition_token(condition) + self.condition_domain
+        return (torch.cat([token, tokens]),
+                torch.cat([centres.new_zeros((1, 2)), centres]))
 
     def _joint(self, flow, hull):
         """启用的输入域 patch token 各自投影 + 域标识后拼接，流场 token 在前。
@@ -108,6 +158,8 @@ class APPSolverOFormer(nn.Module):
         output = {}
         if self.joint:
             tokens, centres = self._joint(flow, hull)
+            if self.condition_token is not None:
+                tokens, centres = self._add_condition_token(tokens, centres, condition)
             latents = self._encode(tokens, centres[None], bias, condition)
             if self.flow_head is not None:
                 output["flow"] = self.flow_head(
@@ -122,9 +174,11 @@ class APPSolverOFormer(nn.Module):
             if head is None or patches is None:
                 continue
             projection = self.flow_input if name == "flow" else self.hull_input
-            centres = patches[2][None].to(projection.weight.device)
-            latents = self._encode(projection(patches[0].to(projection.weight.device)),
-                                   centres, bias, condition)
+            tokens = projection(patches[0].to(projection.weight.device))
+            centres = patches[2].to(projection.weight.device)
+            if self.condition_token is not None:
+                tokens, centres = self._add_condition_token(tokens, centres, condition)
+            latents = self._encode(tokens, centres[None], bias, condition)
             query = flow_queries[..., :2] if name == "flow" else hull_query
-            output[name] = head(self._decode(latents, centres, query, condition))
+            output[name] = head(self._decode(latents, centres[None], query, condition))
         return output

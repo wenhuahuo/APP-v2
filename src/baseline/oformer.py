@@ -14,8 +14,11 @@ APP 按物理尺寸把点集压成 patch token，OFormer 保留每个输入点�
 历史口径的位置取特征的前两维（流场 `(x, y)`、船面 `(u, v)`）。
 
 给出 `input_domains` 时流场与船面点云拼成同一片点云联合编码（船体几何因此进入流场
-预测，两域共用物理 `(x, y)` 作旋转位置），`conditioning: film` 在编码/解码 block 入口
-做逐层 FiLM；缺省时保持历史口径的独立编码与工况加性偏置。
+预测，两域共用物理 `(x, y)` 作旋转位置），`conditioning` 在编码/解码 block 内按
+`src/model/conditioning.py` 的同一套公式融合工况：`film` 入口调制、`adaln` /
+`adaln_zero` 在两条分支的 LayerNorm 后调制、`fourier_add` 入口加编码、`cond_xattn`
+在注意力后插入零门控条件交叉注意力、`none` 与 `cond_token` 不做块内调制（后者由
+整模型加条件 token）；缺省时保持历史口径的独立编码与工况加性偏置。
 """
 
 import math
@@ -23,8 +26,8 @@ import math
 import torch
 import torch.nn as nn
 
-from point_cloud import (CloudEmbedding, ConditionBias, apply_modulation, flow_cloud,
-                         hull_cloud, token_modulation)
+from conditioning import ConditionedBlock, fused_block
+from point_cloud import CloudEmbedding, ConditionBias, flow_cloud, hull_cloud
 
 
 class RotaryEmbedding(nn.Module):
@@ -151,37 +154,35 @@ class FeedForward(nn.Module):
         return self.net(tokens)
 
 
-class EncoderBlock(nn.Module):
+class EncoderBlock(ConditionedBlock):
     def __init__(self, d_model, nhead, mlp_ratio, min_freq, scale, dropout,
                  conditioning=None, condition_dim=2):
-        super().__init__()
-        self.modulation = token_modulation(conditioning, condition_dim, d_model)
+        super().__init__(conditioning, condition_dim, d_model, nhead, dropout)
         self.norm_attention = nn.LayerNorm(d_model)
         self.attention = GalerkinAttention(d_model, nhead, min_freq, scale, dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
         self.mlp = FeedForward(d_model, mlp_ratio, dropout)
 
     def forward(self, tokens, coordinates, condition=None):
-        tokens = apply_modulation(tokens, self.modulation, condition)
-        tokens = tokens + self.attention(self.norm_attention(tokens), coordinates)
-        return tokens + self.mlp(self.norm_mlp(tokens))
+        return fused_block(tokens, condition, self, self.norm_attention,
+                           lambda value: self.attention(value, coordinates),
+                           self.norm_mlp, self.mlp)
 
 
-class DecoderBlock(nn.Module):
+class DecoderBlock(ConditionedBlock):
     def __init__(self, d_model, nhead, mlp_ratio, min_freq, scale, dropout,
                  conditioning=None, condition_dim=2):
-        super().__init__()
-        self.modulation = token_modulation(conditioning, condition_dim, d_model)
+        super().__init__(conditioning, condition_dim, d_model, nhead, dropout)
         self.norm_cross = nn.LayerNorm(d_model)
         self.cross = CrossGalerkinAttention(d_model, nhead, min_freq, scale, dropout)
         self.norm_mlp = nn.LayerNorm(d_model)
         self.mlp = FeedForward(d_model, mlp_ratio, dropout)
 
     def forward(self, queries, latents, query_coords, latent_coords, condition=None):
-        queries = apply_modulation(queries, self.modulation, condition)
-        queries = queries + self.cross(self.norm_cross(queries), latents, query_coords,
-                                       latent_coords)
-        return queries + self.mlp(self.norm_mlp(queries))
+        return fused_block(
+            queries, condition, self, self.norm_cross,
+            lambda value: self.cross(value, latents, query_coords, latent_coords),
+            self.norm_mlp, self.mlp)
 
 
 class Propagator(nn.Module):

@@ -98,19 +98,24 @@ def derive_train_seed(base_path, train_seed):
     只改 `train.seed` 与头注释：数据划分、统计量、容量与训练预算逐项沿用基准配置。
     """
     base_path = Path(base_path)
+    return derive_train_seed_from_text(base_path.read_text(), base_path.name, train_seed)
+
+
+def derive_train_seed_from_text(base_text, base_name, train_seed):
+    """同 `derive_train_seed`，输入是配置全文与文件名，供尚未落盘的派生配置使用。"""
     train_seed = int(train_seed)
-    lines = base_path.read_text().splitlines(keepends=True)
+    lines = base_text.splitlines(keepends=True)
     if not lines or not lines[0].startswith("#"):
-        raise RuntimeError(f"{base_path.name} 缺少头注释")
+        raise RuntimeError(f"{base_name} 缺少头注释")
     text, hits = re.subn(r"^  seed: \d+$", f"  seed: {train_seed}", "".join(lines[1:]),
                          count=1, flags=re.M)
     if hits != 1:
-        raise RuntimeError(f"{base_path.name} 的 train.seed 命中 {hits} 次")
-    protocol = split_capacity(base_path)[2]
+        raise RuntimeError(f"{base_name} 的 train.seed 命中 {hits} 次")
+    protocol = split_capacity(Path(base_name))[2]
     # 头注释沿用基准配置的划分说明（划分与条目数不变），插入训练种子
     split_header = lines[0].rstrip("\n").split("；")[0]
     header = (f"{split_header}；训练种子 {train_seed}（数据划分仍为 {MAIN_SPLIT}）；"
-              f"{protocol}容量，其余超参与 {base_path.name} 一致\n")
+              f"{protocol}容量，其余超参与 {base_name} 一致\n")
     return header + text
 
 
