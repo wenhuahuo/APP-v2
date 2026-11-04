@@ -144,8 +144,9 @@ class APPSolverOFormer(nn.Module):
         if hull is not None:
             blocks.append(self.hull_input(hull[0].to(device)) + self.domain.weight[1])
         tokens = torch.cat(blocks)
-        centres = torch.cat([patches[2] for patches in (flow, hull)
-                             if patches is not None]).to(device)
+        # 学习分词的形心已在参数设备上，硬分词的形心还在 CPU，拼接前逐域搬过来。
+        centres = torch.cat([part[2].to(device) for part in (flow, hull)
+                             if part is not None])
         return tokens, centres
 
     def forward(self, batch, flow_queries):
