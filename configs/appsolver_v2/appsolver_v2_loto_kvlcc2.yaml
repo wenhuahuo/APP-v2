@@ -249,9 +249,7 @@ train:
   - workboat_fr048_normal_mesh
   train_strides:
   - 1
-  - 2
   epochs: 100
-  steps_per_epoch: 48
   learning_rate: 0.001
   weight_decay: 0.0001
   batch_queries: 4096
@@ -265,3 +263,7 @@ train:
   - kvlcc2_fr017_normal_mesh
   - kvlcc2_fr020_normal_mesh
   - kvlcc2_fr023_normal_mesh
+
+eval:
+  strides:
+  - 1

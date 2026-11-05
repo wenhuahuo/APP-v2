@@ -1,9 +1,10 @@
 """按配置在若干查询密度上评测模型，写逐通道指标。
 
 预测与真值都换算回物理量（波高 m、速度 m/s、液面与船面 Cp）；`stride` 依次给查询
-点集密度，训练用过的档位是直接评估，其余是跨分辨率评估。配置里的
-`eval.encode_stride`（或命令行 `--encode-stride`）把输入点云密度固定在某一档，查询
-密度仍逐档变化，用于「固定输入编码、只改查询密度」的协议。指标写
+点集密度，训练用过的档位是直接评估，其余是跨分辨率评估。缺省密度取配置的
+`eval.strides`（正式实验都在配置里固定，默认只评 `stride = 1`），命令行 `--strides`
+会覆盖它。配置里的 `eval.encode_stride`（或命令行 `--encode-stride`）把输入点云密度
+固定在某一档，查询密度仍逐档变化，用于「固定输入编码、只改查询密度」的协议。指标写
 `output/<配置文件名>/metrics_<checkpoint>.json`；固定输入编码的评测写
 `metrics_<checkpoint>_encode<stride>.json`，与同步抽样结果分开保存；
 `--splits` 限定只评测哪个划分（缺省两个都评测）。控制台只按划分与 `stride` 汇总
@@ -39,7 +40,8 @@ STRIDES = (1, 2, 4, 8)
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True)
-    parser.add_argument("--strides", type=int, nargs="+", default=list(STRIDES))
+    parser.add_argument("--strides", type=int, nargs="+", default=None,
+                        help="查询点集密度；缺省用配置的 eval.strides，配置未给出时用 1/2/4/8")
     parser.add_argument("--checkpoint", default="best.pt", help="best.pt 或 last.pt")
     parser.add_argument("--encode-stride", type=int, default=None,
                         help="固定输入点云密度（缺省用配置的 eval.encode_stride）")
@@ -58,6 +60,7 @@ def main():
     normalizer = Normalizer.load(ROOT / config["stats"])
 
     train = config["train"]
+    strides = args.strides or list(config.get("eval", {}).get("strides", STRIDES))
     encode_stride = (args.encode_stride if args.encode_stride is not None
                      else config.get("eval", {}).get("encode_stride"))
     splits = {"train": train["entries"], "val": train["val_entries"]}
@@ -72,7 +75,7 @@ def main():
         "encode_stride": encode_stride,
         "tasks": splits,
         "strides": {split: density_sweep(model, normalizer, ROOT / train["dataset_root"],
-                                         entries, args.strides, device, CHUNK, encode_stride)
+                                         entries, strides, device, CHUNK, encode_stride)
                     for split, entries in splits.items()},
     }
 
@@ -80,7 +83,7 @@ def main():
     metrics_path.write_text(json.dumps(results, indent=2, ensure_ascii=False) + "\n")
     print(f"{config['model_type']}，{args.checkpoint} epoch {checkpoint['epoch']}，"
           f"指标写入 {metrics_path}")
-    for line in summary_lines(splits, results["strides"], args.strides):
+    for line in summary_lines(splits, results["strides"], strides):
         print(line)
 
 

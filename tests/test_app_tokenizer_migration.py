@@ -28,6 +28,9 @@ from collate import collate_samples  # noqa: E402
 import make_app_migration_configs as configs  # noqa: E402
 
 MODELS = ("transolver", "upt", "gnot")
+# 本轮实验只训练 APP+Transolver 与 APP+UPT（6 个 run）；APP+GNOT 保留配置不跑。
+SBATCH_MODELS = ("appsolver_transolver", "appsolver_upt")
+SBATCH = ROOT / "scripts" / "train" / "train_app_tokenizer_migration.sbatch"
 SPLIT = "random_seed0"
 NX, NY, HULL_POINTS, QUERIES = 17, 9, 40, 7
 FINE_TIERS = [[None, 0.2]]
@@ -80,6 +83,39 @@ class MigrationConfigTest(unittest.TestCase):
                     self.assertEqual(config["model"][key], baseline["model"][key], key)
                 self.assertEqual(config["model"]["flow_size_tiers"],
                                  configs.tokenizer_settings()["flow_size_tiers"])
+
+    def test_receiver_backbone_comes_from_the_isoflops_baseline(self):
+        """接收方主干宽度取固定 GFLOPs 基线：与它逐项相同，而不是固定参数量口径。"""
+        for model in MODELS:
+            with self.subTest(model=model):
+                self.assertEqual(configs.baseline_path(model).name,
+                                 f"{model}_{SPLIT}_isoflops.yaml")
+                config = yaml.safe_load(configs.output_path(model).read_text())
+                baseline = yaml.safe_load(configs.baseline_path(model).read_text())
+                for key in configs.STRUCT_KEYS[model]:
+                    self.assertEqual(config["model"][key], baseline["model"][key], key)
+
+    def test_configs_use_the_single_resolution_protocol(self):
+        for model in MODELS:
+            with self.subTest(model=model):
+                config = yaml.safe_load(configs.output_path(model).read_text())
+                self.assertEqual(config["train"]["train_strides"], [1])
+                self.assertEqual(config["eval"]["strides"], [1])
+                self.assertNotIn("steps_per_epoch", config["train"])
+
+    def test_sbatch_array_covers_two_models_and_three_seeds(self):
+        """数组 0-5：先种子、后模型（APP+Transolver / APP+UPT），与配置一一对应。"""
+        text = SBATCH.read_text()
+        self.assertIn("--array=0-5%2", text)
+        block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
+        self.assertEqual(tuple(block.split()), SBATCH_MODELS)
+        self.assertIn('CONFIG="configs/${MODEL}/${MODEL}_${SPLIT}.yaml"', text)
+        self.assertIn('_${SPLIT}_train_seed${TRAIN_SEED}.yaml', text)
+        for model in SBATCH_MODELS:
+            for train_seed in (0, 1, 2):
+                suffix = "" if not train_seed else f"_train_seed{train_seed}"
+                path = ROOT / "configs" / model / f"{model}_{SPLIT}{suffix}.yaml"
+                self.assertTrue(path.is_file(), path)
 
     def test_train_seed_configs_only_change_the_seed(self):
         for model in MODELS:

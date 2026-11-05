@@ -1,4 +1,4 @@
-# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 190 / val 34；APP Patch token 作为 Transolver 物理切片注意力输入，slice 主干之后接坐标查询解码（主干容量与 transolver_random_seed0.yaml 一致），其余训练协议与 transolver_random_seed0.yaml 一致
+# 划分 random_seed0（random_split，留出 RandomState(0) 抽 15%）：train 190 / val 34；APP Patch token 作为 Transolver 物理切片注意力输入，slice 主干之后接坐标查询解码（主干容量与 transolver_random_seed0_isoflops.yaml 一致），其余训练协议与 transolver_random_seed0_isoflops.yaml 一致
 stats: dataset/shipbench/stats_random_seed0.json
 model_type: appsolver_transolver
 model:
@@ -16,7 +16,7 @@ model:
   - - null
     - 0.15
   hull_size: 0.05
-  d_model: 208
+  d_model: 176
   nhead: 8
   layers: 3
   slices: 32
@@ -222,9 +222,7 @@ train:
   - workboat_fr048_normal_mesh
   train_strides:
   - 1
-  - 2
   epochs: 100
-  steps_per_epoch: 48
   learning_rate: 0.001
   weight_decay: 0.0001
   batch_queries: 4096
@@ -266,3 +264,7 @@ train:
   - series60_wigley_w025_fr024_normal_mesh
   - series60_workboat_w025_fr024_normal_mesh
   - series60_workboat_w050_fr026_normal_mesh
+
+eval:
+  strides:
+  - 1

@@ -4,8 +4,9 @@
 
 - APPSolver-v2（`random_seed0` 划分）：基础配置 `appsolver_v2_flow_with_hull_random_seed0.yaml`；
 - APP+OFormer（`random_seed0` 划分，固定 GFLOPs 容量）：基础配置
-  `appsolver_oformer_random_seed0_isoflops.yaml`，即 `flow_with_hull` 组本身（已有训练结果，
-  生成器不重写它），只派生 `flow_only` 与 `joint_flow_hull`。
+  `appsolver_oformer_random_seed0_isoflops.yaml`，即 `flow_with_hull` 组本身（正式实验
+  直接复用它的三个训练种子 run），生成器不重写它，只派生 `flow_only` 与
+  `joint_flow_hull` 两组，每组训练种子 0/1/2。
 
     python3 scripts/train/make_framework_ablation_configs.py
 """
@@ -14,6 +15,8 @@ import re
 from pathlib import Path
 
 import yaml
+
+import make_split_configs
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "configs" / "appsolver_v2"
@@ -55,7 +58,7 @@ def header(name):
 
 
 def oformer_variants():
-    """APP+OFormer 固定 GFLOPs 容量的两组派生配置：{文件名: 文本}。"""
+    """APP+OFormer 固定 GFLOPs 容量的两组派生配置：{文件名: {种子: 文本}}。"""
     base_text = OFORMER_BASE.read_text()
     base = yaml.safe_load(base_text)
     model = base["model"]
@@ -66,9 +69,14 @@ def oformer_variants():
     derived = {}
     for name in OFORMER_DERIVED:
         input_domains, output_domains = VARIANTS[name]
-        text = derive(base_text, input_domains, output_domains)
+        text = header(name) + derive(base_text, input_domains, output_domains)
         stem = OFORMER_BASE.stem.replace("_random_seed0_isoflops", "")
-        derived[f"{stem}_{name}_random_seed0_isoflops.yaml"] = header(name) + text
+        filename = f"{stem}_{name}_random_seed0_isoflops.yaml"
+        derived[filename] = {0: text}
+        # 训练种子变体只改 `train.seed` 与头注释，复用主实验的派生规则。
+        for train_seed in make_split_configs.TRAIN_SEEDS:
+            derived[filename][train_seed] = make_split_configs.derive_train_seed_from_text(
+                text, OFORMER_BASE.name, train_seed)
     return derived
 
 
@@ -84,10 +92,14 @@ def main():
         output.write_text(header(name) + text)
         print(output.name)
 
-    for filename, text in oformer_variants().items():
-        output = OFORMER_DIR / filename
-        output.write_text(text)
-        print(output.name)
+    for filename, seed_texts in oformer_variants().items():
+        for train_seed, text in seed_texts.items():
+            output = OFORMER_DIR / filename
+            if train_seed:
+                output = OFORMER_DIR / make_split_configs.train_seed_output_name(
+                    OFORMER_DIR / filename, train_seed)
+            output.write_text(text)
+            print(output.name)
 
 
 if __name__ == "__main__":

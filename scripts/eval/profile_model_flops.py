@@ -134,16 +134,18 @@ def tokens_from_batch(config, batch, index=0):
     raise ValueError(f"{model_type} 的 token 口径未定义")
 
 
-def training_tokens(config_path, dataset, entry, steps=2400):
-    """一个训练协议（100 epoch × 48 step）下的主干 token 总量。
+def training_tokens(config_path, dataset, entry):
+    """一个训练协议（每 epoch 遍历全部训练条目各一次）下的主干 token 总量。
 
-    `train_strides=[1,2]` 按步交替，`steps` 为每档步数（2400 步 stride 1 + 2400 步
-    stride 2）。APP 系列与逐点模型的 token 数随输入密度变化，latent / 潜网格模型的
-    编码 token 数与输入密度无关。
+    `train_strides` 里每条条目均匀随机取一档，因此总步数为「训练条目数 × epoch 数」，
+    每档约占 `1 / len(train_strides)`。APP 系列与逐点模型的 token 数随输入密度变化，
+    latent / 潜网格模型的编码 token 数与输入密度无关。
     """
-    fine = token_count_at(config_path, dataset, entry, 1)[0]
-    coarse = token_count_at(config_path, dataset, entry, 2)[0]
-    return steps * (fine + coarse)
+    train = load_config(config_path)["train"]
+    strides = list(train["train_strides"])
+    steps = len(train["entries"]) * train["epochs"]
+    total = sum(token_count_at(config_path, dataset, entry, stride)[0] for stride in strides)
+    return steps * total // len(strides)
 
 
 def main():

@@ -144,6 +144,32 @@ class ConditioningConfigTest(unittest.TestCase):
                                      base["train"])
 
 
+class AblationSbatchTest(unittest.TestCase):
+    """两个消融数组：分词 6 个元素、工况融合 15 个元素，元素与配置一一对应。"""
+
+    def test_partition_array_covers_six_runs(self):
+        text = (ROOT / "scripts" / "train" /
+                "train_app_oformer_partition_ablation.sbatch").read_text()
+        self.assertIn("--array=0-5%1", text)
+        self.assertIn("--job-name=app-oformer-partition-ablation", text)
+        block = text.split("CONFIGS=(", 1)[1].split(")", 1)[0]
+        configs = tuple(block.split())
+        self.assertEqual(len(configs), 6)
+        for path in configs:
+            self.assertTrue((ROOT / path).is_file(), path)
+
+    def test_conditioning_array_covers_fifteen_runs(self):
+        text = (ROOT / "scripts" / "train" /
+                "train_app_oformer_conditioning_ablation.sbatch").read_text()
+        self.assertIn("--array=0-14%1", text)
+        self.assertIn("--job-name=app-oformer-conditioning-ablation", text)
+        block = text.split("CONFIGS=(", 1)[1].split(")", 1)[0]
+        configs = tuple(block.split())
+        self.assertEqual(len(configs), 15)
+        for path in configs:
+            self.assertTrue((ROOT / path).is_file(), path)
+
+
 class PartitionForwardTest(unittest.TestCase):
     def setUp(self):
         self.batch = fake_batch()

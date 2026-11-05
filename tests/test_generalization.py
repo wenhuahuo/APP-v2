@@ -7,7 +7,8 @@
 - 派生配置只改 `train.seed` 与头注释：划分条目、`stats`、容量与训练预算逐项沿用 seed 0；
 - 划分语义取 `configs/splits_multihull.json` 的既定定义（218/6 与 213/11），统计量指向
   同一划分训练集拟合的 `stats_<划分>.json`，三个种子共用；
-- 两个数组作业各 15 个元素、`%1`，元素与配置一一对应（每个模型三个训练种子连续排列）。
+- 两个数组作业各 15 个元素、`%2`，元素与配置一一对应（每个模型三个训练种子连续排列）;
+- 两个划分的配置都只训练与评测 stride 1（`train_strides: [1]`、`eval.strides: [1]`）。
 """
 
 import json
@@ -102,12 +103,23 @@ class GeneralizationConfigTest(unittest.TestCase):
                     self.assertEqual(config["stats"],
                                      f"dataset/shipbench/stats_{split}.json")
 
+    def test_generalization_runs_single_resolution(self):
+        """泛化实验沿用主实验协议：训练与评测都只跑 stride 1，没有 steps_per_epoch。"""
+        for split in SPLITS:
+            for model in MODELS:
+                for train_seed in TRAIN_SEEDS:
+                    with self.subTest(split=split, model=model, seed=train_seed):
+                        config = yaml.safe_load(config_path(model, split, train_seed).read_text())
+                        self.assertEqual(config["train"]["train_strides"], [1])
+                        self.assertEqual(config["eval"]["strides"], [1])
+                        self.assertNotIn("steps_per_epoch", config["train"])
+
     def test_sbatch_arrays_cover_exactly_the_runs(self):
-        """两个数组各 15 个元素、%1，元素按「模型 × 训练种子」排列且与配置一一对应。"""
+        """两个数组各 15 个元素、%2，元素按「模型 × 训练种子」排列且与配置一一对应。"""
         for split in SPLITS:
             text = SBATCH[split].read_text()
             with self.subTest(split=split):
-                self.assertIn("--array=0-14%1", text)
+                self.assertIn("--array=0-14%2", text)
                 self.assertIn(f"--job-name={JOB_NAMES[split]}", text)
                 block = text.split("CONFIGS=(", 1)[1].split(")", 1)[0]
                 configs = tuple(block.split())

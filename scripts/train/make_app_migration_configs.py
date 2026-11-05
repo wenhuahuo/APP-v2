@@ -1,16 +1,17 @@
-"""从主实验 `random_seed0` 基线配置派生 APP 分词前端迁移配置。
+"""从固定 GFLOPs 容量的主实验 `random_seed0` 基线配置派生 APP 分词前端迁移配置。
 
 三个新模型（APP+Transolver、APP+UPT、APP+GNOT）各自复用对应基线配置的训练协议：
-`train` 段（190/34 条目、统计量、100 epoch × 48 step、`train_strides=[1,2]`、
-`lambda_hull=0.0`、种子）逐行照抄，因此数据划分与训练预算与主实验完全一致。模型段只
-保留基线的接收方主干结构与宽度（`d_model` / 层数 / slice 数 / latent 数 / 专家数等），
-再接上 APP 双域分词前端与坐标查询解码；分词参数（`flow_size_tiers` / `hull_size`）
-取 `appsolver_oformer_random_seed0.yaml`，与主实验的 APP 分词口径相同。
+`train` 段（190/34 条目、统计量、100 epoch、`train_strides=[1]`、`lambda_hull=0.0`、
+种子）逐行照抄，因此数据划分与训练预算与主实验完全一致。模型段只保留基线的接收方
+主干结构与宽度（`d_model` / 层数 / slice 数 / latent 数 / 专家数等），再接上 APP 双域
+分词前端与坐标查询解码；分词参数（`flow_size_tiers` / `hull_size`）取
+`appsolver_oformer_random_seed0_isoflops.yaml`，与主实验的 APP 分词口径相同。
 
     python3 scripts/train/make_app_migration_configs.py
 
 每种容量口径只派生 `random_seed0` 与训练种子 1、2，共 3 模型 × 3 种子 = 9 份配置；
-留一船型、留一设计 Fr 与等计算量口径不派生。
+留一船型、留一设计 Fr 与等计算量口径不派生。本轮实验只训练 APP+Transolver 与
+APP+UPT（`train_app_tokenizer_migration.sbatch`），APP+GNOT 保留配置不训练。
 """
 
 from pathlib import Path
@@ -40,7 +41,7 @@ QUERY_KEYS = {
              "decoder_layers": 2},
 }
 # APP 分词参数取自主实验的 APP+OFormer 配置（与 APPSolver-v2 相同）
-TOKENIZER_SOURCE = CONFIG_DIR / "appsolver_oformer" / f"appsolver_oformer_{SPLIT}.yaml"
+TOKENIZER_SOURCE = CONFIG_DIR / "appsolver_oformer" / f"appsolver_oformer_{SPLIT}_isoflops.yaml"
 HEADERS = {
     "transolver": "APP Patch token 作为 Transolver 物理切片注意力输入，slice 主干之后接坐标查询解码",
     "upt": "APP Patch token 作为 UPT perceiver 编码器输入，latent 与原生坐标查询解码不变",
@@ -49,7 +50,8 @@ HEADERS = {
 
 
 def baseline_path(model):
-    return CONFIG_DIR / model / f"{model}_{SPLIT}.yaml"
+    """接收方基准：主实验固定 GFLOPs 容量口径，主干宽度与层数逐项取自它。"""
+    return CONFIG_DIR / model / f"{model}_{SPLIT}_isoflops.yaml"
 
 
 def new_model(model):

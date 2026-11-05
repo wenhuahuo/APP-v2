@@ -33,9 +33,7 @@ train:
   - containership_fr022_normal_mesh
   train_strides:
   - 1
-  - 2
   epochs: 100
-  steps_per_epoch: 48
   learning_rate: 0.001
   weight_decay: 0.0001
   batch_queries: 4096
@@ -45,3 +43,7 @@ train:
   val_entries:
   - s175_fr029_normal_mesh
   - kvlcc2_fr014_normal_mesh
+
+eval:
+  strides:
+  - 1

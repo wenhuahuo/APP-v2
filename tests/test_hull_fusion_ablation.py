@@ -79,36 +79,65 @@ class HullFusionConfigTest(unittest.TestCase):
     def test_derived_configs_match_the_generator(self):
         derived = configs.oformer_variants()
         self.assertEqual(set(derived), {FLOW_ONLY, JOINT})
-        for filename, text in derived.items():
-            with self.subTest(config=filename):
-                self.assertEqual((OFORMER_DIR / filename).read_text(), text)
+        for filename, seed_texts in derived.items():
+            self.assertEqual(set(seed_texts), {0, 1, 2})
+            for train_seed, text in seed_texts.items():
+                name = (filename if not train_seed else filename.replace(
+                    "_random_seed0_isoflops",
+                    f"_random_seed0_train_seed{train_seed}_isoflops"))
+                with self.subTest(config=name):
+                    self.assertEqual((OFORMER_DIR / name).read_text(), text)
 
     def test_variants_only_change_the_task_protocol(self):
         base = load(FLOW_WITH_HULL)
         self.assertEqual(base["model"]["input_domains"], ["flow", "hull"])
         self.assertEqual(base["model"]["output_domains"], ["flow"])
         self.assertEqual(base["train"]["lambda_hull"], 0.0)
-        expected = {FLOW_ONLY: (["flow"], ["flow"], 0.0),
-                    JOINT: (["flow", "hull"], ["flow", "hull"], 1.0)}
-        for filename, (inputs, outputs, lambda_hull) in expected.items():
-            with self.subTest(config=filename):
-                config = load(filename)
-                self.assertEqual(config["model_type"], base["model_type"])
-                self.assertEqual(config["model"]["input_domains"], inputs)
-                self.assertEqual(config["model"]["output_domains"], outputs)
-                self.assertEqual(config["train"]["lambda_hull"], lambda_hull)
-                self.assertEqual(config["stats"], base["stats"])
-                model = dict(config["model"])
-                base_model = dict(base["model"])
-                for key in ("input_domains", "output_domains"):
-                    model.pop(key)
-                    base_model.pop(key)
-                self.assertEqual(model, base_model)
-                train = dict(config["train"])
-                base_train = dict(base["train"])
-                train.pop("lambda_hull")
-                base_train.pop("lambda_hull")
-                self.assertEqual(train, base_train)
+        expected = {"flow_only": (["flow"], ["flow"], 0.0),
+                    "joint_flow_hull": (["flow", "hull"], ["flow", "hull"], 1.0)}
+        for group, (inputs, outputs, lambda_hull) in expected.items():
+            for train_seed in (0, 1, 2):
+                filename = (f"appsolver_oformer_{group}_random_seed0_isoflops.yaml"
+                            if not train_seed else
+                            f"appsolver_oformer_{group}_random_seed0_train_seed"
+                            f"{train_seed}_isoflops.yaml")
+                with self.subTest(config=filename):
+                    config = load(filename)
+                    self.assertEqual(config["model_type"], base["model_type"])
+                    self.assertEqual(config["train"]["seed"], train_seed)
+                    self.assertEqual(config["model"]["input_domains"], inputs)
+                    self.assertEqual(config["model"]["output_domains"], outputs)
+                    self.assertEqual(config["train"]["lambda_hull"], lambda_hull)
+                    self.assertEqual(config["stats"], base["stats"])
+                    model = dict(config["model"])
+                    base_model = dict(base["model"])
+                    for key in ("input_domains", "output_domains"):
+                        model.pop(key)
+                        base_model.pop(key)
+                    self.assertEqual(model, base_model)
+                    train = dict(config["train"])
+                    base_train = dict(base["train"])
+                    train.pop("lambda_hull")
+                    base_train.pop("lambda_hull")
+                    train.pop("seed")
+                    base_train.pop("seed")
+                    self.assertEqual(train, base_train)
+
+
+class HullFusionSbatchTest(unittest.TestCase):
+    """数组 0-5：flow_only / joint_flow_hull 各三个训练种子，与配置一一对应。"""
+
+    def test_array_covers_six_runs(self):
+        text = (ROOT / "scripts" / "train" /
+                "train_app_oformer_hull_fusion.sbatch").read_text()
+        self.assertIn("--array=0-5%1", text)
+        self.assertIn("--job-name=app-oformer-hull-fusion", text)
+        for group in ("flow_only", "joint_flow_hull"):
+            for train_seed in (0, 1, 2):
+                suffix = "" if not train_seed else f"_train_seed{train_seed}"
+                path = (OFORMER_DIR /
+                        f"appsolver_oformer_{group}_random_seed0{suffix}_isoflops.yaml")
+                self.assertTrue(path.is_file(), path)
 
 
 class JointHullMetricTest(unittest.TestCase):

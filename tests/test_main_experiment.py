@@ -50,9 +50,12 @@ SPLITS = (MAIN_SPLIT,) + RETAINED_SPLITS
 # 容量口径：目录里固定的基础配置后缀 -> 该口径派生配置的附加后缀
 CAPACITIES = (("_multihull_normal", ""), ("_multihull_isoflops", "_isoflops"))
 SBATCH = ROOT / "scripts" / "train" / "train_main_experiment.sbatch"
-SHARED_TRAIN_KEYS = ("epochs", "steps_per_epoch", "learning_rate", "weight_decay",
-                     "batch_queries", "val_queries", "train_strides", "seed", "lambda_hull",
-                     "device", "dataset_root")
+SHARED_TRAIN_KEYS = ("epochs", "learning_rate", "weight_decay", "batch_queries",
+                     "val_queries", "train_strides", "seed", "lambda_hull", "device",
+                     "dataset_root")
+# 正式实验的训练协议：每个 epoch 遍历全部训练条目，默认只训练与评测 stride 1。
+DEFAULT_TRAIN_STRIDES = [1]
+DEFAULT_EVAL_STRIDES = [1]
 SPLIT_KEYS = ("entries", "val_entries")
 NX, NY = 17, 9
 HULL_POINTS = 40
@@ -215,13 +218,16 @@ class MainConfigTest(unittest.TestCase):
                     self.assertEqual(config["train"]["lambda_hull"], 0.0)
 
     def test_sbatch_covers_exactly_the_main_table(self):
-        """数组任务与主表一一对应：9 个元素、random_seed0、两种容量由 CAPACITY 选择。"""
+        """数组任务与主表一一对应：9 个模型 × 3 个训练种子、固定计算量容量。"""
         text = SBATCH.read_text()
-        self.assertIn("--array=0-8%1", text)
+        self.assertIn("--array=0-26%2", text)
         self.assertIn(f'SPLIT="{MAIN_SPLIT}"', text)
-        self.assertIn("CAPACITY_SUFFIX=\"_isoflops\"", text)
+        self.assertNotIn("CAPACITY", text)
         models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
         self.assertEqual(tuple(models_block.split()), MODELS)
+        seeds_block = text.split("TRAIN_SEEDS=(", 1)[1].split(")", 1)[0]
+        self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), (0,) + TRAIN_SEEDS)
+        self.assertIn('_isoflops.yaml', text)
 
     def test_multiseed_configs_only_change_the_training_seed(self):
         """36 份多种子配置：划分、统计量、容量与训练预算与 seed0 逐项一致，只改 train.seed。"""
@@ -254,15 +260,14 @@ class MainConfigTest(unittest.TestCase):
                         self.assertEqual(path.read_text(),
                                          make_split_configs.derive_train_seed(base_path, train_seed))
 
-    def test_sbatch_multiseed_arrays_cover_two_training_seeds(self):
-        """多种子入口：TRAIN_SEEDS 选训练种子，两组各 18 个元素（先种子、后模型）。"""
-        text = SBATCH.read_text()
-        self.assertIn('TRAIN_SEEDS="${TRAIN_SEEDS:-0}"', text)
-        self.assertIn("_train_seed${TRAIN_SEED}", text)
-        self.assertIn("--array=0-17%1", text)
-        self.assertIn("SLURM_ARRAY_TASK_COUNT", text)
-        for job in ("main-fixed-parameters-multiseed", "main-fixed-gflops-multiseed"):
-            self.assertIn(job, text)
+    def test_main_protocol_is_single_resolution(self):
+        """默认实验只训练与评测 stride 1，且不再有 steps_per_epoch（每轮遍历全部条目）。"""
+        for model in MODELS:
+            with self.subTest(model=model):
+                config = load(model, MAIN_SPLIT, "_isoflops")
+                self.assertEqual(config["train"]["train_strides"], DEFAULT_TRAIN_STRIDES)
+                self.assertEqual(config["eval"]["strides"], DEFAULT_EVAL_STRIDES)
+                self.assertNotIn("steps_per_epoch", config["train"])
 
     def test_historical_configs_keep_legacy_semantics(self):
         """KCS 与消融配置保留双域输出与 lambda_hull=1.0，不被默认值改写。"""
