@@ -1,17 +1,17 @@
-"""等计算量（iso-FLOPs）配置：9 个模型在共同前向 GFLOPs 下的容量标定。
+"""等计算量（iso-FLOPs）配置：7 个主实验模型在共同前向 GFLOPs 下的容量标定。
 
 判别点：
 
 - 每个主实验模型都有 `configs/<模型>/<模型>_multihull_isoflops.yaml`，且与
   `*_multihull_normal.yaml` 的差别只在主干容量（宽度/层数）：分词或潜网格、latent 数、
-  任务口径与训练协议（epoch、步数、优化器）完全一致；例外是 CORAL 与 APPSolver-v1 的
-  学习率降为 1e-4（lr=1e-3 在这两个模型上塌缩为常数场），单独断言；
+  任务口径与训练协议（epoch、步数、优化器）完全一致；例外是 APPSolver-v1 的学习率降为
+  1e-4（lr=1e-3 会塌缩为常数场），单独断言；
 - token 预算与宽度解耦：标定后的主干 token 数与基础配置相同；
 - 配置可构造、可前向（合成批），形状契约与主实验一致；
 - 真实输入上的前向 GFLOPs 落在 APPSolver-v2 主线实测值的 ±5% 内（历史 iso-FLOPs 对照
   同口径）；该断言用 `kcs_fr026_normal_mesh` 的真实格点，缺数据集时跳过。测量在子进程里
   逐个模型执行：`FlopCounterMode` 需要 autograd 图，单次前向的激活已占数 GB，同一进程
-  连续测量 9 个模型会把内存耗尽。
+  连续测量 7 个模型会把内存耗尽。
 """
 
 import json
@@ -35,8 +35,9 @@ from profile_model_flops import tokens_from_batch  # noqa: E402
 CONFIG_DIR = ROOT / "configs"
 DATASET = ROOT / "dataset" / "shipbench"
 ENTRY = "kcs_fr026_normal_mesh"
+# 主实验的 7 个模型（GINO 与 CORAL 已因训练成本与数值塌缩移出实验计划）
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
-          "transolver", "oformer", "gino", "coral")
+          "transolver", "oformer")
 ANCHOR = "appsolver_v2"
 TOLERANCE = 0.05
 # 每个模型被标定的容量键；其余键必须与基础配置逐项相同。
@@ -51,7 +52,8 @@ CAPACITY_KEYS = {
     "gino": {"gno_kernel_hidden"},
     "coral": {"siren_hidden", "modulation_hidden"},
 }
-# 学习率降到 1e-4 的两个模型：固定计算量容量下 lr=1e-3 会塌缩为常数场
+# 学习率降到 1e-4 的模型（固定计算量容量下 lr=1e-3 会塌缩为常数场）：CORAL 已移出实验
+# 计划，其配置保留在仓库里，因此仍列出
 LOW_LR_MODELS = ("coral", "appsolver_v1")
 NX, NY, HULL_POINTS = 17, 9, 40
 
@@ -91,7 +93,8 @@ class IsoflopsConfigTest(unittest.TestCase):
         for model in MODELS:
             base, calibrated = load(model, "multihull_normal"), load(model, "multihull_isoflops")
             self.assertEqual(base["model_type"], calibrated["model_type"])
-            # 学习率单独断言：CORAL / APPSolver-v1 的等计算量配置降为 1e-4，其余训练项相同
+            # 学习率单独断言：APPSolver-v1（以及保留的 CORAL）的等计算量配置降为 1e-4，
+            # 其余训练项相同
             self.assertEqual({key: value for key, value in base["train"].items()
                               if key != "learning_rate"},
                              {key: value for key, value in calibrated["train"].items()
@@ -121,7 +124,7 @@ class IsoflopsConfigTest(unittest.TestCase):
 
 @unittest.skipUnless((DATASET / ENTRY / "meta.json").exists(), "数据集条目不存在")
 class IsoflopsMeasurementTest(unittest.TestCase):
-    """真实输入上的前向 GFLOPs：9 个模型都落在锚点的 ±5% 内。"""
+    """真实输入上的前向 GFLOPs：7 个主实验模型都落在锚点的 ±5% 内。"""
 
     @staticmethod
     def measure(config_path):

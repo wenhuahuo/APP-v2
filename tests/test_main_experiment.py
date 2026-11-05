@@ -1,18 +1,18 @@
-"""主实验公平配置：9 个模型在同一任务口径下的配置与模型行为。
+"""主实验公平配置：7 个模型在同一任务口径下的配置与模型行为。
 
-主实验范围是 `random_seed0` 随机划分：9 个模型 × 2 种容量口径（固定参数量
-`_multihull_normal`、固定计算量 `_multihull_isoflops`）= 18 份配置。留一船型与留一
+主实验范围是 `random_seed0` 随机划分：7 个模型 × 2 种容量口径（固定参数量
+`_multihull_isoflops`）= 14 份配置。留一船型与留一
 设计 Fr 的配置由同一生成器派生、保留给后续泛化实验，本轮主实验不训练它们。
 
 判别点：
 
-- 主表 18 份配置的 `stats`、训练/验证条目和训练超参完全一致，同一容量口径下只有模型
-  自身结构不同（例外：CORAL 与 APPSolver-v1 的固定计算量配置用 lr 1e-4，因为 lr=1e-3
-  在这两个模型上塌缩为常数场）；
+- 主表 14 份配置的 `stats`、训练/验证条目和训练超参完全一致，同一容量口径下只有模型
+  自身结构不同（例外：APPSolver-v1 的固定计算量配置用 lr 1e-4，因为 lr=1e-3 会塌缩为
+  常数场）；
 - 派生配置由 `make_split_configs.py` 按划分定义确定性生成：只替换 `stats`、
   `train.entries`、`train.val_entries` 与头注释，容量超参与基础配置逐项相同（三个划分
   × 两种容量共 54 份都走同一条生成路径，含保留的泛化实验配置）；
-- 全部配置共用单一种子 `seed=0`；多种子复跑从 `random_seed0` 派生 36 份
+- 全部配置共用单一种子 `seed=0`；多种子复跑从 `random_seed0` 派生 28 份
   `<模型>_random_seed0_train_seed{1,2}[_isoflops].yaml`，只改 `train.seed` 与头注释，
   数据划分、统计量、容量与训练预算逐项不变（文件名同时标注划分与训练种子）；
 - 训练数组脚本用 `TRAIN_SEEDS` 选训练种子：默认 `0` 保持原 9 元素行为，`TRAIN_SEEDS=1,2`
@@ -42,8 +42,10 @@ from trainer import Trainer  # noqa: E402
 import make_split_configs  # noqa: E402
 
 CONFIG_DIR = ROOT / "configs"
+# 主实验的 7 个模型；GINO 与 CORAL 已因训练成本与数值塌缩移出实验计划（实现与
+# `configs/{gino,coral}/*` 保留在仓库里，但不再训练与报告）
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
-          "transolver", "oformer", "gino", "coral")
+          "transolver", "oformer")
 # 主实验只跑随机划分；留一船型和留一设计 Fr 的配置保留给后续泛化实验
 MAIN_SPLIT = "random_seed0"
 RETAINED_SPLITS = ("loto_kvlcc2", "lofo_fr_design")
@@ -54,7 +56,8 @@ SBATCH = ROOT / "scripts" / "train" / "train_main_experiment.sbatch"
 SHARED_TRAIN_KEYS = ("epochs", "weight_decay", "batch_queries",
                      "val_queries", "train_strides", "seed", "lambda_hull", "device",
                      "dataset_root")
-# 学习率降到 1e-4 的两个模型：固定计算量容量下 lr=1e-3 会塌缩为常数场
+# 学习率降到 1e-4 的模型（固定计算量容量下 lr=1e-3 会塌缩为常数场）：CORAL 已移出实验
+# 计划，其配置保留在仓库里，因此仍列出
 LOW_LR_MODELS = ("coral", "appsolver_v1")
 # 正式实验的训练协议：每个 epoch 遍历全部训练条目，默认只训练与评测 stride 1。
 DEFAULT_TRAIN_STRIDES = [1]
@@ -129,8 +132,8 @@ def perturbed(batch, key, value):
 
 
 class MainConfigTest(unittest.TestCase):
-    def test_main_table_is_nine_models_in_two_capacities(self):
-        """主表恰好 18 份配置：9 模型 × 固定参数量 / 固定计算量，划分都是 random_seed0。"""
+    def test_main_table_is_seven_models_in_two_capacities(self):
+        """主表恰好 14 份配置：7 模型 × 固定参数量 / 固定计算量，划分都是 random_seed0。"""
         for _, capacity_suffix in CAPACITIES:
             for model in MODELS:
                 with self.subTest(model=model, capacity=capacity_suffix):
@@ -161,8 +164,8 @@ class MainConfigTest(unittest.TestCase):
                     for key in SHARED_TRAIN_KEYS:
                         self.assertEqual(config["train"][key], reference["train"][key], key)
 
-    def test_low_learning_rate_only_for_coral_and_appsolver_v1(self):
-        """CORAL 与 APPSolver-v1 用 lr 1e-4（lr=1e-3 会塌缩为常数场），其余模型仍为 1e-3。"""
+    def test_low_learning_rate_only_for_appsolver_v1(self):
+        """APPSolver-v1 用 lr 1e-4（lr=1e-3 会塌缩为常数场），其余主实验模型仍为 1e-3。"""
         for model in MODELS:
             with self.subTest(model=model):
                 config = load(model, MAIN_SPLIT, "_isoflops")
@@ -188,7 +191,7 @@ class MainConfigTest(unittest.TestCase):
                         self.assertEqual(load(model, split, capacity_suffix)["train"]["seed"], 0)
 
     def test_committed_configs_match_the_generator(self):
-        """派生幂等：重新生成必须逐字节等于提交的 54 份配置。"""
+        """派生幂等：重新生成必须逐字节等于提交的划分派生配置。"""
         for base_suffix, capacity_suffix in CAPACITIES:
             for model in MODELS:
                 base = CONFIG_DIR / model / f"{model}{base_suffix}.yaml"
@@ -229,9 +232,9 @@ class MainConfigTest(unittest.TestCase):
                     self.assertEqual(config["train"]["lambda_hull"], 0.0)
 
     def test_sbatch_covers_exactly_the_main_table(self):
-        """数组任务与主表一一对应：9 个模型 × 3 个训练种子、固定计算量容量。"""
+        """数组任务与主表一一对应：7 个模型 × 3 个训练种子、固定计算量容量。"""
         text = SBATCH.read_text()
-        self.assertIn("--array=0-26%2", text)
+        self.assertIn("--array=0-20%2", text)
         self.assertIn(f'SPLIT="{MAIN_SPLIT}"', text)
         self.assertNotIn("CAPACITY", text)
         models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
@@ -241,7 +244,7 @@ class MainConfigTest(unittest.TestCase):
         self.assertIn('_isoflops.yaml', text)
 
     def test_multiseed_configs_only_change_the_training_seed(self):
-        """36 份多种子配置：划分、统计量、容量与训练预算与 seed0 逐项一致，只改 train.seed。"""
+        """28 份多种子配置：划分、统计量、容量与训练预算与 seed0 逐项一致，只改 train.seed。"""
         for _, capacity_suffix in CAPACITIES:
             for model in MODELS:
                 base = yaml.safe_load(seed0_path(model, capacity_suffix).read_text())
@@ -300,7 +303,7 @@ class MainConfigTest(unittest.TestCase):
 
 @unittest.skipUnless(torch.cuda.is_available(), "需要 CUDA 才能校验 CPU 分词 → GPU 模型的搬运")
 class CudaForwardTest(unittest.TestCase):
-    """9 个主实验模型在 GPU 上跑通：分词在 CPU 完成，参数与形心必须搬到模型所在设备。"""
+    """7 个主实验模型在 GPU 上跑通：分词在 CPU 完成，参数与形心必须搬到模型所在设备。"""
 
     def test_all_main_models_forward_on_cuda(self):
         sample = synthetic_sample()

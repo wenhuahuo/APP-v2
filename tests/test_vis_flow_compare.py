@@ -3,7 +3,7 @@
 不跑推理（检查点在集群、数据集不入 git），只验证
 - `row_limits` 由该行真值与预测合并计算，且误差列使用同一对 vmin/vmax；
 - `plot_fields` 能为三行三列出图，返回的范围与 `row_limits` 逐行一致；
-- 两个出图脚本的模型清单、配置与固定条目核对：9 个模型、5 个模型、条目在对应验证集里。
+- 两个出图脚本的模型清单、配置与固定条目核对：7 个模型、5 个模型、条目在对应验证集里。
 """
 
 import importlib.util
@@ -36,7 +36,7 @@ MAIN = load_script(ROOT / "vis" / "main_experiment" / "plot_main_experiment.py")
 THREE = load_script(ROOT / "vis" / "three_split_eval" / "plot_three_split_eval.py")
 
 MAIN_MODELS = {"appsolver_oformer", "transolver", "appsolver_v2", "gnot", "upt",
-               "oformer", "appsolver_v1", "gino", "coral"}
+               "oformer", "appsolver_v1"}
 THREE_MODELS = {"appsolver_oformer", "transolver", "appsolver_v2", "gnot", "oformer"}
 
 
@@ -155,7 +155,7 @@ def test_plot_fields_accepts_group_limits(tmp_path):
 
 def test_main_experiment_manifest():
     assert set(MAIN.MODELS) == MAIN_MODELS
-    assert len(MAIN.MODELS) == 9 and len(set(MAIN.MODELS)) == 9
+    assert len(MAIN.MODELS) == 7 and len(set(MAIN.MODELS)) == 7
     splits = json.loads(SPLITS_FILE.read_text())
     assert MAIN.SPLIT == "random_seed0"
     assert MAIN.ENTRY in splits[MAIN.SPLIT]["val"]

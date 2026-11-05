@@ -1,4 +1,4 @@
-"""前向计算量统计口径：CPU 融合注意力必须被计数，token 口径要覆盖 9 个主实验模型。
+"""前向计算量统计口径：CPU 融合注意力必须被计数，token 口径要覆盖 7 个主实验模型。
 
 判别点：
 
@@ -7,7 +7,7 @@
   perceiver、APPSolver-v1 的 TransformerEncoderLayer 都会被低估）。这里用解析值逐项
   核对：投影矩阵乘 + q@kᵀ + scores@v 之和必须与实测一致；
 - 计数与重复次数无关（同一模型连续两次统计给出同一个 GFLOPs）；
-- `tokens_from_batch` 对 9 个模型都给出明确口径，且感性 token 数与主算子序列长度一致。
+- `tokens_from_batch` 对 7 个主实验模型都给出明确口径，且 token 数与主算子序列长度一致。
 """
 
 import sys
@@ -27,8 +27,9 @@ from flops import _attention_flops, forward_flops  # noqa: E402
 from profile_model_flops import tokens_from_batch  # noqa: E402
 
 CONFIG_DIR = ROOT / "configs"
+# 主实验的 7 个模型（GINO 与 CORAL 已因训练成本与数值塌缩移出实验计划）
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
-          "transolver", "oformer", "gino", "coral")
+          "transolver", "oformer")
 NX, NY, HULL_POINTS = 17, 9, 40
 
 
@@ -105,7 +106,7 @@ class AttentionFlopFormulaTest(unittest.TestCase):
 
 
 class TokenDefinitionTest(unittest.TestCase):
-    """9 个模型的主干 token 数与口径：patch / point / latent / latent_grid。"""
+    """主实验模型的主干 token 数与口径：patch / point / latent / latent_grid。"""
 
     def setUp(self):
         self.batch = synthetic_batch()
