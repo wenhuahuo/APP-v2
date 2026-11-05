@@ -36,7 +36,9 @@ OFormer、GINO、CORAL。覆盖面 `random_seed0` / `loto_kvlcc2` / `lofo_fr_des
 划分，配置由 `scripts/train/make_split_configs.py` 从各模型
 `configs/<模型>/<模型>_multihull_isoflops.yaml` 派生（固定 GFLOPs 容量、训练种子 0/1/2）。
 训练时每个 epoch 遍历全部训练条目各一次（随机顺序，一条目一步），`train_strides: [1]`
-表示官方 run 只用全密度输入，评测也只在 stride 1 上做。
+表示官方 run 只用全密度输入，评测也只在 stride 1 上做。优化超参统一为 AdamW
+`weight_decay=1e-4`、`lr=1e-3`，仅 CORAL 与 APPSolver-v1 用 `lr=1e-4`：这两个模型在
+`lr=1e-3` 下会塌缩为常数场（固定计算量容量下），其余 7 个模型保持 1e-3。
 
 新基线按论文路线实现：GINO 为「输入几何点云 → GNO 半径核积分到潜规则网格 → FNO →
 GNO 解码到任意查询点」，CORAL 为「点集编码到 latent → latent 调制的 SIREN 坐标神经场

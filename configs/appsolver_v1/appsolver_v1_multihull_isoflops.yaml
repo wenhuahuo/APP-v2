@@ -1,8 +1,9 @@
 # appsolver_v1：等计算量（iso-FLOPs）对照，前向 214.8 GFLOPs、49.366 M 参数
 # 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、
 # lambda_hull=0.0
-# 与 appsolver_v1_multihull_normal.yaml 的唯一差别是主干容量
-# （d_model 112 → 724），分词/潜网格与训练协议不变
+# 与 appsolver_v1_multihull_normal.yaml 的差别是主干容量
+# （d_model 112 → 724），分词/潜网格不变
+# 学习率降为 1e-4：APPSolver-v1 在 lr=1e-3 下塌缩为常数场（其余模型仍为 1e-3）
 stats: dataset/shipbench/stats.json
 model_type: appsolver_v1
 model:
@@ -30,7 +31,7 @@ train:
   train_strides:
   - 1
   epochs: 100
-  learning_rate: 0.001
+  learning_rate: 0.0001
   weight_decay: 0.0001
   batch_queries: 4096
   val_queries: 16384

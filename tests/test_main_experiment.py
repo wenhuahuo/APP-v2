@@ -7,7 +7,8 @@
 判别点：
 
 - 主表 18 份配置的 `stats`、训练/验证条目和训练超参完全一致，同一容量口径下只有模型
-  自身结构不同；
+  自身结构不同（例外：CORAL 与 APPSolver-v1 的固定计算量配置用 lr 1e-4，因为 lr=1e-3
+  在这两个模型上塌缩为常数场）；
 - 派生配置由 `make_split_configs.py` 按划分定义确定性生成：只替换 `stats`、
   `train.entries`、`train.val_entries` 与头注释，容量超参与基础配置逐项相同（三个划分
   × 两种容量共 54 份都走同一条生成路径，含保留的泛化实验配置）；
@@ -50,9 +51,11 @@ SPLITS = (MAIN_SPLIT,) + RETAINED_SPLITS
 # 容量口径：目录里固定的基础配置后缀 -> 该口径派生配置的附加后缀
 CAPACITIES = (("_multihull_normal", ""), ("_multihull_isoflops", "_isoflops"))
 SBATCH = ROOT / "scripts" / "train" / "train_main_experiment.sbatch"
-SHARED_TRAIN_KEYS = ("epochs", "learning_rate", "weight_decay", "batch_queries",
+SHARED_TRAIN_KEYS = ("epochs", "weight_decay", "batch_queries",
                      "val_queries", "train_strides", "seed", "lambda_hull", "device",
                      "dataset_root")
+# 学习率降到 1e-4 的两个模型：固定计算量容量下 lr=1e-3 会塌缩为常数场
+LOW_LR_MODELS = ("coral", "appsolver_v1")
 # 正式实验的训练协议：每个 epoch 遍历全部训练条目，默认只训练与评测 stride 1。
 DEFAULT_TRAIN_STRIDES = [1]
 DEFAULT_EVAL_STRIDES = [1]
@@ -157,6 +160,14 @@ class MainConfigTest(unittest.TestCase):
                                      reference["train"]["val_entries"])
                     for key in SHARED_TRAIN_KEYS:
                         self.assertEqual(config["train"][key], reference["train"][key], key)
+
+    def test_low_learning_rate_only_for_coral_and_appsolver_v1(self):
+        """CORAL 与 APPSolver-v1 用 lr 1e-4（lr=1e-3 会塌缩为常数场），其余模型仍为 1e-3。"""
+        for model in MODELS:
+            with self.subTest(model=model):
+                config = load(model, MAIN_SPLIT, "_isoflops")
+                expected = 1e-4 if model in LOW_LR_MODELS else 1e-3
+                self.assertEqual(config["train"]["learning_rate"], expected)
 
     def test_entries_match_the_shared_split_file(self):
         for split, definition in splits_definition().items():
