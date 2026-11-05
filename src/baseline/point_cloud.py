@@ -12,6 +12,9 @@
 需要分辨率无关查询的模型（UPT / GINO / CORAL / OFormer）从查询坐标解码，不经过
 格点下标；把输出留在输入点上的模型（GNOT / Transolver / APPSolver-v1）用
 `lattice_index` 从整片预测里取值。
+
+流场输入特征只有自由液面坐标 `(x, y)`：到船体水线的符号距离只用于 APP 分词器的
+分档判据（`src/app/tokenizer.py`），不进任何模型的输入。
 """
 
 import math
@@ -21,15 +24,14 @@ import torch.nn as nn
 
 from conditioning import FiLM, NoConditioning
 
-FLOW_FEATURES = ("x", "y", "sdf")
+FLOW_FEATURES = ("x", "y")
 HULL_FEATURES = ("u", "v", "x", "y", "z", "nx", "ny", "nz")
 
 
 def flow_cloud(batch, index=0):
-    """当前条目流场格点的输入特征 (1, nx*ny, 3)；掩除位只由权重屏蔽。"""
+    """当前条目流场格点的输入特征 (1, nx*ny, 2)，只有坐标；掩除位只由权重屏蔽。"""
     coords = batch["flow_coords"][index].reshape(-1, 2)
-    sdf = batch["flow_sdf"][index].reshape(-1)
-    return torch.column_stack([coords, sdf])[None]
+    return coords[None]
 
 
 def hull_cloud(batch, index=0):
@@ -55,7 +57,7 @@ def joint_cloud(batch, index=0):
     """
     flow = flow_cloud(batch, index)[0]
     hull = hull_cloud(batch, index)[0]
-    coords = torch.cat([flow[:, :2], hull[:, 2:4]])
+    coords = torch.cat([flow, hull[:, 2:4]])
     return flow, hull, coords, len(flow)
 
 

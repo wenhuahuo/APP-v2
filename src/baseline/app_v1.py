@@ -13,8 +13,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from point_cloud import (CloudEmbedding, ConditionBias, apply_modulation, flow_cloud,
-                         hull_cloud, lattice_index, token_modulation)
+from point_cloud import (FLOW_FEATURES, CloudEmbedding, ConditionBias, apply_modulation,
+                         flow_cloud, hull_cloud, lattice_index, token_modulation)
 
 
 def point_patches(coords, valid, patch_size):
@@ -90,7 +90,7 @@ class APPSolverV1Baseline(nn.Module):
             self.cloud = CloudEmbedding(d_model)
             features = d_model
         else:
-            features = 3
+            features = len(FLOW_FEATURES)
         if "flow" in self.output_domains:
             self.flow_patches = PatchTransformer(
                 features, flow_channels, patch_size, d_model, nhead, layers, mlp_ratio,

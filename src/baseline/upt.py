@@ -19,8 +19,9 @@ latent 数量固定，输入点数变化时表征容量不变；解码只依赖�
 
 import torch.nn as nn
 
-from point_cloud import (CloudEmbedding, ConditionBias, PerceiverEncoder, apply_modulation,
-                         flow_cloud, hull_cloud, sincos_embedding, token_modulation)
+from point_cloud import (FLOW_FEATURES, CloudEmbedding, ConditionBias, PerceiverEncoder,
+                         apply_modulation, flow_cloud, hull_cloud, sincos_embedding,
+                         token_modulation)
 
 
 class QueryCrossBlock(nn.Module):
@@ -60,7 +61,7 @@ class UPTBaseline(nn.Module):
         if self.joint:
             self.cloud = CloudEmbedding(d_model)
         else:
-            self.flow_input = nn.Linear(3, d_model)
+            self.flow_input = nn.Linear(len(FLOW_FEATURES), d_model)
             self.hull_input = nn.Linear(8, d_model)
         self.condition = ConditionBias(condition_dim, d_model) if conditioning is None else None
         self.encoder = PerceiverEncoder(d_model, nhead, layers, latents, mlp_ratio, dropout,

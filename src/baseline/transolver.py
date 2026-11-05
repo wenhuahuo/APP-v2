@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from point_cloud import (CloudEmbedding, ConditionBias, apply_modulation, flow_cloud,
-                         hull_cloud, lattice_index, token_modulation)
+from point_cloud import (FLOW_FEATURES, CloudEmbedding, ConditionBias, apply_modulation,
+                         flow_cloud, hull_cloud, lattice_index, token_modulation)
 
 
 class PhysicsAttention(nn.Module):
@@ -75,7 +75,7 @@ class TransolverBaseline(nn.Module):
         if self.joint:
             self.cloud = CloudEmbedding(d_model)
         else:
-            self.flow_input = nn.Linear(3, d_model)
+            self.flow_input = nn.Linear(len(FLOW_FEATURES), d_model)
             self.hull_input = nn.Linear(8, d_model)
         self.condition = ConditionBias(condition_dim, d_model) if conditioning is None else None
         self.blocks = nn.ModuleList([

@@ -10,7 +10,7 @@
 因此 OFormer 与 APP 一样是分辨率无关的查询算子，两者的差别在于分词方式：
 APP 按物理尺寸把点集压成 patch token，OFormer 保留每个输入点做线性注意力。
 与原始仓库的差异只有维度取整（交叉注意力在 d_model 而不是 d_model/2）与激活函数，
-机制保持一致。输入特征与其它基线相同（流场 `(x, y, sdf)`、船面八维特征），
+机制保持一致。输入特征与其它基线相同（流场 `(x, y)`、船面八维特征），
 历史口径的位置取特征的前两维（流场 `(x, y)`、船面 `(u, v)`）。
 
 给出 `input_domains` 时流场与船面点云拼成同一片点云联合编码（船体几何因此进入流场
@@ -27,7 +27,7 @@ import torch
 import torch.nn as nn
 
 from conditioning import ConditionedBlock, fused_block
-from point_cloud import CloudEmbedding, ConditionBias, flow_cloud, hull_cloud
+from point_cloud import FLOW_FEATURES, CloudEmbedding, ConditionBias, flow_cloud, hull_cloud
 
 
 class RotaryEmbedding(nn.Module):
@@ -225,7 +225,7 @@ class OFormerBaseline(nn.Module):
         if self.joint:
             self.cloud = CloudEmbedding(d_model)
         else:
-            self.flow_input = nn.Linear(3, d_model)
+            self.flow_input = nn.Linear(len(FLOW_FEATURES), d_model)
             self.hull_input = nn.Linear(8, d_model)
         self.condition = ConditionBias(condition_dim, d_model) if conditioning is None else None
         self.encoder = nn.ModuleList([

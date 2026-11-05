@@ -32,8 +32,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from scipy.spatial import cKDTree
 
-from point_cloud import (apply_modulation, flow_cloud, hull_cloud, normalize_within,
-                         token_modulation)
+from point_cloud import (FLOW_FEATURES, apply_modulation, flow_cloud, hull_cloud,
+                         normalize_within, token_modulation)
 
 
 def radius_neighbors(data, queries, radius):
@@ -200,7 +200,7 @@ class GINOBaseline(nn.Module):
             raise ValueError("GINO 的输入几何必须包含自由液面点云")
         self.latent_shape = tuple(int(size) for size in latent_shape)
         self.hidden_channels = hidden_channels
-        self.flow_input = nn.Linear(3, embed_channels)
+        self.flow_input = nn.Linear(len(FLOW_FEATURES), embed_channels)
         self.hull_input = nn.Linear(8, embed_channels) if "hull" in self.input_domains else None
         self.domain = nn.Embedding(2, embed_channels)
         # 线性核积分的核输出通道必须与输入特征通道一致（官方 IntegralTransform）
