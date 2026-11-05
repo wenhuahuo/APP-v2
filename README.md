@@ -30,20 +30,19 @@ ShipBenchv2 由 OpenFOAM 稳态算例构建，包含：
 
 ## 主实验基线
 
-主实验对比 9 个模型，口径完全一致（自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、
+主实验对比 7 个模型，口径完全一致（自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、
 `lambda_hull=0.0`）：APPSolver-v2、APP+OFormer、APPSolver-v1、GNOT、UPT、Transolver、
-OFormer、GINO、CORAL。覆盖面 `random_seed0` / `loto_kvlcc2` / `lofo_fr_design` 三个
-划分，配置由 `scripts/train/make_split_configs.py` 从各模型
+OFormer。GINO 与 CORAL 已从实验中移除（训练成本与数值塌缩），源代码与
+`configs/gino/`、`configs/coral/` 保留在仓库但不再训练与报告。覆盖面
+`random_seed0` / `loto_kvlcc2` / `lofo_fr_design` 三个划分，配置由 `scripts/train/make_split_configs.py` 从各模型
 `configs/<模型>/<模型>_multihull_isoflops.yaml` 派生（固定 GFLOPs 容量、训练种子 0/1/2）。
 训练时每个 epoch 遍历全部训练条目各一次（随机顺序，一条目一步），`train_strides: [1]`
 表示官方 run 只用全密度输入，评测也只在 stride 1 上做。优化超参统一为 AdamW
-`weight_decay=1e-4`、`lr=1e-3`，仅 CORAL 与 APPSolver-v1 用 `lr=1e-4`：这两个模型在
-`lr=1e-3` 下会塌缩为常数场（固定计算量容量下），其余 7 个模型保持 1e-3。
+`weight_decay=1e-4`、`lr=1e-3`，仅 APPSolver-v1 用 `lr=1e-4`：该模型在 `lr=1e-3` 下会
+塌缩为常数场（固定计算量容量下），其余 6 个模型保持 1e-3。
 
-新基线按论文路线实现：GINO 为「输入几何点云 → GNO 半径核积分到潜规则网格 → FNO →
-GNO 解码到任意查询点」，CORAL 为「点集编码到 latent → latent 调制的 SIREN 坐标神经场
-解码任意查询点」，UPT 的 `decoder(x, query_x, query_fx)` 在查询坐标上独立解码。实现
-依据与口径见 `docs/main_experiment_protocol.md`。
+UPT 的 `decoder(x, query_x, query_fx)` 在查询坐标上独立解码，实现依据与口径见
+`docs/main_experiment_protocol.md`。
 
 ## 训练与评测
 
@@ -57,12 +56,12 @@ python3 scripts/eval/evaluate_model.py \
   --config configs/appsolver_v2/appsolver_v2_flow_with_hull_random_seed0.yaml \
   --checkpoint best.pt               # 查询密度缺省取配置的 eval.strides
 # 多分辨率训练验证的配置（`*_multires_*`）在配置里给出 eval.strides: [1, 2, 4, 8]
-# 固定输入编码密度、只改变查询密度（UPT / GINO / CORAL / OFormer / APP 系列）
+# 固定输入编码密度、只改变查询密度（UPT / OFormer / APP 系列）
 python3 scripts/eval/evaluate_model.py \
-  --config configs/gino/gino_random_seed0.yaml --encode-stride 2
+  --config configs/upt/upt_random_seed0.yaml --encode-stride 2
 
 python3 scripts/eval/profile_model_flops.py
-python3 scripts/eval/measure_inference_time.py   # 18 个 run × stride 1/2/4/8 单条目延迟
+python3 scripts/eval/measure_inference_time.py   # 14 个 run × stride 1/2/4/8 单条目延迟
 python3 scripts/eval/summarize_cross_resolution.py
 python3 -m pytest tests
 ```
