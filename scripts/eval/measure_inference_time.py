@@ -1,4 +1,4 @@
-"""测量主实验 18 个 run 的单条目前向延迟（stride 1/2/4/8），写 `inference_time.json`。
+"""测量主实验 14 个 run 的单条目前向延迟（stride 1/2/4/8），写 `inference_time.json`。
 
 口径（与 `docs/main_experiment_protocol.md` 的推理时间章节一致）：
 
@@ -15,7 +15,8 @@
 
 用法:
     python3 scripts/eval/measure_inference_time.py
-    python3 scripts/eval/measure_inference_time.py --configs configs/gino/gino_random_seed0.yaml
+    python3 scripts/eval/measure_inference_time.py \
+        --configs configs/gnot/gnot_random_seed0.yaml
 """
 
 import argparse
@@ -34,7 +35,7 @@ from build import build_model  # noqa: E402
 from latency import fixed_inputs, summarize_sweeps, time_forward  # noqa: E402
 
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
-          "transolver", "oformer", "gino", "coral")
+          "transolver", "oformer")
 CAPACITY_SUFFIXES = ("", "_isoflops")
 STRIDES = (1, 2, 4, 8)
 ENTRY = "kcs_fr026_normal_mesh"

@@ -3,10 +3,10 @@
 数据来源（全部为已落盘的评测产物）：
 
 - `output/<配置名>/metrics_best.json`：训练后同步抽样评测，输入与查询同时按 stride
-  1/2/4/8 抽稀，18 个 run 全部有；
+  1/2/4/8 抽稀，14 个 run 全部有；
 - `output/<配置名>/metrics_best_encode1.json`：输入编码固定 stride=1、只改查询密度的
-  评测（`scripts/eval/evaluate_model.py --encode-stride 1 --splits val`），6 个独立
-  查询模型 × 2 种容量共 12 个 run；
+  评测（`scripts/eval/evaluate_model.py --encode-stride 1 --splits val`），4 个独立
+  查询模型 × 2 种容量共 8 个 run；
 - `output/<配置名>/inference_time.json`：
   `scripts/eval/measure_inference_time.py` 的单条目前向延迟。
 
@@ -30,10 +30,10 @@ sys.path.insert(0, str(ROOT / "src" / "eval"))
 from aggregate import eta_rmse_mm, overall  # noqa: E402
 
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
-          "transolver", "oformer", "gino", "coral")
+          "transolver", "oformer")
 CAPACITIES = (("固定参数量", ""), ("固定计算量", "_isoflops"))
 STRIDES = (1, 2, 4, 8)
-ENCODE_MODELS = ("appsolver_v2", "appsolver_oformer", "oformer", "upt", "gino", "coral")
+ENCODE_MODELS = ("appsolver_v2", "appsolver_oformer", "oformer", "upt")
 HEADER_STRIDES = tuple(f"stride {stride}" for stride in STRIDES)
 
 

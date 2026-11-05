@@ -38,7 +38,7 @@ from point_cloud import joint_cloud  # noqa: E402
 from ship_dataset import ShipDataset  # noqa: E402
 from tokenizer import flow_tokens, hull_tokens  # noqa: E402
 
-# 用主实验配置的模型结构做对照：主表 9 个模型的任务口径一致（双域输入、仅流场输出、
+# 用主实验配置的模型结构做对照：主表 7 个模型的任务口径一致（双域输入、仅流场输出、
 # 逐层 FiLM、lambda_hull=0.0），参数量与 GFLOPs 才可比。历史 KCS/消融配置保留原口径。
 # 等计算量配置（`*_multihull_isoflops.yaml`）由 `scripts/eval/calibrate_isoflops.py`
 # 写出，统计口径与这里完全相同。
@@ -50,8 +50,6 @@ DEFAULT_CONFIGS = (
     "configs/transolver/transolver_multihull_normal.yaml",
     "configs/appsolver_oformer/appsolver_oformer_multihull_normal.yaml",
     "configs/appsolver_v1/appsolver_v1_multihull_normal.yaml",
-    "configs/gino/gino_multihull_normal.yaml",
-    "configs/coral/coral_multihull_normal.yaml",
 )
 POINT_TOKEN_MODELS = ("gnot", "oformer", "transolver")
 

@@ -11,14 +11,17 @@
 每个派生配置只改三处：`train.entries`、`train.val_entries`、`stats`（指向该划分
 训练集拟合的统计量），外加开头一行头注释。模型结构、容量超参、任务口径与优化超参与
 基础配置完全一致（双域输入、仅流场输出、逐层 FiLM、`lambda_hull=0.0`），因此同一
-容量口径下的 9 个模型是同口径对照，两种容量口径之间的差别只有主容量。
+容量口径下的模型互为同口径对照，两种容量口径之间的差别只有主容量。
 
-多种子复跑以 `random_seed0` 的 18 份配置为基准再派生 36 份（9 模型 × 2 种容量 ×
+多种子复跑以 `random_seed0` 的 14 份配置为基准再派生 28 份（7 模型 × 2 种容量 ×
 训练种子 1、2）：
 
 - 固定参数量：`<模型>_random_seed0.yaml` → `<模型>_random_seed0_train_seed<S>.yaml`
 - 固定计算量：`<模型>_random_seed0_isoflops.yaml` →
   `<模型>_random_seed0_train_seed<S>_isoflops.yaml`
+
+GINO 与 CORAL 已从实验计划中移除（训练成本与数值塌缩），源代码与
+`configs/{gino,coral}/*` 保留，但不进入实验计划，也不再派生它们的多种子与多分辨率配置。
 
 数据划分始终是 `random_seed0`（同一份 `stats_random_seed0.json`、同样的 190/34 条目），
 文件名里 `random_seed0` 与 `train_seed<S>` 分别标注「数据划分」与「训练种子」；派生
@@ -44,9 +47,9 @@ CAPACITY_PROTOCOLS = {
     "_multihull_normal": "固定参数量",
     "_multihull_isoflops": "固定计算量（iso-FLOPs）",
 }
-# 主实验的 9 个模型（主表顺序，配置目录同名）
+# 主实验的 7 个模型（主表顺序，配置目录同名）
 MODELS = ("appsolver_v2", "appsolver_oformer", "appsolver_v1", "gnot", "upt",
-          "transolver", "oformer", "gino", "coral")
+          "transolver", "oformer")
 # 多种子复跑：数据划分固定为 MAIN_SPLIT，只换训练种子
 MAIN_SPLIT = "random_seed0"
 TRAIN_SEEDS = (1, 2)
