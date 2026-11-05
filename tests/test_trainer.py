@@ -51,6 +51,80 @@ class SingleDomainLossTest(unittest.TestCase):
         self.assertAlmostEqual(float(hull["total"]), 1.25)
 
 
+class EpochTraversalTest(unittest.TestCase):
+    """每个 epoch 遍历全部训练条目各一次，每条的查询密度档位取自 `train_strides`。"""
+
+    ENTRIES = ("a", "b", "c", "d", "e")
+
+    class TraceDataset:
+        """记录被取到的条目名的假数据集，只实现 `__len__` / `__getitem__`。"""
+
+        def __init__(self, stride, trace):
+            self.stride = stride
+            self.trace = trace
+
+        def __len__(self):
+            return len(EpochTraversalTest.ENTRIES)
+
+        def __getitem__(self, i):
+            self.trace.append((self.stride, EpochTraversalTest.ENTRIES[i]))
+            return {}
+
+    def _trainer(self, train_strides):
+        """绕过 `__init__`：假数据集 + 单参数模型，只驱动 `train_epoch` 的抽样控制流。"""
+        trainer = object.__new__(Trainer)
+        parameter = torch.nn.Parameter(torch.zeros(1))
+        self.trace = []
+        trainer.model = types.SimpleNamespace(train=lambda: None)
+        trainer.config = {"train_strides": list(train_strides), "batch_queries": 4,
+                          "lambda_hull": 0.0}
+        trainer.domains = ("flow",)
+        trainer.generator = torch.Generator().manual_seed(0)
+        trainer.optimizer = torch.optim.SGD([parameter], lr=0.0)
+        trainer.datasets = {stride: self.TraceDataset(stride, self.trace)
+                            for stride in train_strides}
+        trainer._sample_queries = lambda count, generator, dataset: None
+        trainer._forward = lambda sample, index: (
+            None, (parameter, torch.zeros(1), torch.ones(1)), None)
+        return trainer, parameter
+
+    def test_every_entry_is_visited_exactly_once_per_epoch(self):
+        trainer, _ = self._trainer([1])
+        trainer.train_epoch(0)
+        self.assertEqual(sorted(entry for _, entry in self.trace), sorted(self.ENTRIES))
+        # 一个 epoch 一条目一步：没有条目被重复访问，也没有条目被跳过
+        self.assertEqual(len(self.trace), len(self.ENTRIES))
+
+    def test_epoch_order_is_a_random_permutation_from_the_seeded_generator(self):
+        trainer, _ = self._trainer([1])
+        trainer.train_epoch(0)
+        first = [entry for _, entry in self.trace]
+        self.trace.clear()
+        trainer.train_epoch(1)
+        second = [entry for _, entry in self.trace]
+        self.assertNotEqual(first, second)
+        # 同种子重建：两轮的顺序序列可复现
+        replay, _ = self._trainer([1])
+        replay.train_epoch(0)
+        self.assertEqual([entry for _, entry in self.trace], first)
+
+    def test_single_stride_is_used_for_every_entry(self):
+        trainer, _ = self._trainer([1])
+        trainer.train_epoch(0)
+        self.assertEqual({stride for stride, _ in self.trace}, {1})
+
+    def test_strides_are_drawn_from_the_configured_levels(self):
+        trainer, _ = self._trainer([1, 2])
+        levels = []
+        for epoch in range(20):
+            self.trace.clear()
+            trainer.train_epoch(epoch)
+            self.assertEqual(len(self.trace), len(self.ENTRIES))
+            levels.extend(stride for stride, _ in self.trace)
+            self.assertEqual(sorted(entry for _, entry in self.trace), sorted(self.ENTRIES))
+        self.assertEqual(set(levels), {1, 2})
+
+
 class EvaluateTest(unittest.TestCase):
     def test_validation_only_returns_active_domain(self):
         for domain in ("flow", "hull"):

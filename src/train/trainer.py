@@ -1,9 +1,11 @@
 """训练循环：查询点集随机子采样、按启用输出域计算损失、按验证损失选 checkpoint。
 
-自由液面域有十万量级查询点，每步随机抽一部分计算损失；查询是输出函数上的采样，
-抽子集不改变模型的定义。验证用的是独立条目（`train.val_entries`），固定查询点集，
-便于跨 epoch 比较。
-`train_strides` 给出训练时的查询密度档位（1 = 标签点集原密度），每步随机取一档。
+每个 epoch 遍历全部训练条目各一次，顺序由 `trainer` 自己的种子生成器抽出的随机排列
+决定（批大小固定为 1，一条目一步）。自由液面域有十万量级查询点，每步再随机抽一部分
+计算损失；查询是输出函数上的采样，抽子集不改变模型的定义。验证用的是独立条目
+（`train.val_entries`），固定查询点集，便于跨 epoch 比较。
+`train_strides` 给出训练时的查询密度档位（1 = 标签点集原密度），每条条目随机取一档；
+验证固定用 `train_strides[0]`。
 计算设备由配置的 `device` 显式给出（`cpu` / `cuda`），不做自动回退。
 
 验证要在整条验证集上前向，比一轮训练贵；`VALIDATION_INTERVAL` 给出验证间隔，
@@ -78,14 +80,21 @@ class Trainer:
             hull = (output["hull"][0], hull_target[0], batch["hull_weight"][0])
         return output, flow, hull
 
+    def _epoch_strides(self, count):
+        """一条目一档：为整个 epoch 在 `train_strides` 里均匀随机抽取（同一种子生成器）。"""
+        strides = self.config["train_strides"]
+        draws = torch.randint(len(strides), (count,), generator=self.generator)
+        return [strides[int(draw)] for draw in draws]
+
     def train_epoch(self, epoch):
         self.model.train()
-        strides = self.config["train_strides"]
+        count = len(self.datasets[self.config["train_strides"][0]])
+        order = torch.randperm(count, generator=self.generator).tolist()
+        strides = self._epoch_strides(count)
         total = 0.0
-        for step in range(self.config["steps_per_epoch"]):
-            stride = strides[step % len(strides)]
+        for entry, stride in zip(order, strides):
             dataset = self.datasets[stride]
-            sample = dataset[step % len(dataset)]
+            sample = dataset[entry]
             index = (self._sample_queries(self.config["batch_queries"], self.generator, dataset)
                      if "flow" in self.domains else None)
             _, flow, hull = self._forward(sample, index)
@@ -95,7 +104,7 @@ class Trainer:
             losses["total"].backward()
             self.optimizer.step()
             total += losses["total"].item()
-        return total / self.config["steps_per_epoch"]
+        return total / count
 
     @torch.no_grad()
     def evaluate(self):
