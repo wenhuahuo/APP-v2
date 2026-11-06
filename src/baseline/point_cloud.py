@@ -62,10 +62,16 @@ def joint_cloud(batch, index=0):
 
 
 def lattice_index(batch, queries, index=0):
-    """查询点坐标 → 格点展平下标。查询点由格点抽样得到，整数换算没有舍入误差。"""
-    nx, ny = batch["flow_coords"].shape[1:3]
-    x0, y0, x1, y1 = batch["flow_extent"][index].tolist()
-    step_x, step_y = (x1 - x0) / (nx - 1), (y1 - y0) / (ny - 1)
+    """查询点坐标 → 格点展平下标。查询点由格点抽样得到，整数换算没有舍入误差。
+
+    格距取抽稀后格点的实际相邻差分：`stride` 大于 1 时格点数减一不一定整除原格距，
+    用包围盒除以格点数会得到偏大的步长，把靠后的行映射到相邻行。
+    """
+    coords = batch["flow_coords"][index]
+    _, ny = coords.shape[:2]
+    x0, y0 = coords[0, 0].tolist()
+    step_x = (coords[1, 0, 0] - coords[0, 0, 0]).item()
+    step_y = (coords[0, 1, 1] - coords[0, 0, 1]).item()
     ix = torch.round((queries[..., 0] - x0) / step_x).long()
     iy = torch.round((queries[..., 1] - y0) / step_y).long()
     return ix * ny + iy
