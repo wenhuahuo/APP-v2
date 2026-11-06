@@ -15,7 +15,7 @@ ShipBenchv2 由 OpenFOAM 稳态算例构建，包含：
 
 ## 默认模型
 
-默认配置：`configs/appsolver_v2/appsolver_v2_flow_with_hull_random_seed0.yaml`。
+默认配置：`configs/appsolver_v2/appsolver_v2_random_seed0_isoflops.yaml`。
 
 | 组件 | 设置 |
 | --- | --- |
@@ -49,11 +49,8 @@ UPT 的 `decoder(x, query_x, query_fx)` 在查询坐标上独立解码，实现�
 使用 `/opt/miniconda3/envs/mesh` 环境，并确保配置引用的归一化统计量已由训练集生成。
 
 ```bash
-python3 scripts/train/train_model.py \
-  --config configs/appsolver_v2/appsolver_v2_flow_with_hull_random_seed0.yaml
-
 python3 scripts/eval/evaluate_model.py \
-  --config configs/appsolver_v2/appsolver_v2_flow_with_hull_random_seed0.yaml \
+  --config configs/appsolver_v2/appsolver_v2_random_seed0_isoflops.yaml \
   --checkpoint best.pt               # 查询密度缺省取配置的 eval.strides
 # 多分辨率训练验证的配置（`*_multires_*`）在配置里给出 eval.strides: [1, 2, 4, 8]
 # 固定输入编码密度、只改变查询密度（UPT / OFormer / APP 系列）
