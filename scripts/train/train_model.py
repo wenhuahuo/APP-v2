@@ -27,12 +27,16 @@ def main():
 
     config_path = Path(args.config)
     config = yaml.safe_load(config_path.read_text())
+    # 产物目录在这里解析成绝对路径并打印：同名目录被归档移动后，NFS 目录项缓存仍可能
+    # 让写入落到旧位置，日志里的绝对路径是事后核对产物到底写进哪一份的唯一依据。
+    output_dir = (ROOT / "output" / config_path.stem).resolve()
+    print(f"output_dir={output_dir}")
     # 种子必须在构造模型之前固定，权重初始化才可复现；Trainer 会再固定一次查询采样。
     seed = set_seed(config["train"]["seed"])
     model = build_model(config)
     normalizer = Normalizer.load(ROOT / config["stats"])
 
-    trainer = Trainer(model, normalizer, config, ROOT / "output" / config_path.stem)
+    trainer = Trainer(model, normalizer, config, output_dir)
     parameters = sum(p.numel() for p in model.parameters())
     print(f"{config_path.stem}: {config['model_type']} {parameters / 1e6:.3f} M 参数，"
           f"seed {seed}，训练条目 {len(config['train']['entries'])}，"

@@ -51,7 +51,9 @@ def main():
 
     config_path = Path(args.config)
     config = yaml.safe_load(config_path.read_text())
-    output_dir = ROOT / "output" / config_path.stem
+    # 与 train_model.py 一致：产物目录解析成绝对路径并打印，便于事后核对写入位置。
+    output_dir = (ROOT / "output" / config_path.stem).resolve()
+    print(f"output_dir={output_dir}")
     device = torch.device(config["train"]["device"])
     checkpoint = torch.load(output_dir / args.checkpoint, weights_only=False, map_location=device)
     model = build_model(config).to(device)
