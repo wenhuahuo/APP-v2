@@ -126,19 +126,20 @@ class HullFusionConfigTest(unittest.TestCase):
 
 
 class HullFusionSbatchTest(unittest.TestCase):
-    """数组 0-5：flow_only / flow_with_hull 各三个训练种子，与配置一一对应。"""
+    """数组 0-1：flow_only / flow_with_hull 各一个训练种子（seed 0），与配置一一对应。"""
 
-    def test_array_covers_six_runs(self):
+    def test_array_covers_seed0_runs(self):
         text = (ROOT / "scripts" / "train" /
                 "train_app_oformer_hull_fusion.sbatch").read_text()
-        self.assertIn("--array=0-5%1", text)
-        self.assertIn("--job-name=app-oformer-hull-fusion", text)
+        self.assertIn("--array=0-1%1", text)
+        self.assertIn("--job-name=app-oformer-hull-fusion-seed0", text)
+        seeds_block = text.split("TRAIN_SEEDS=(", 1)[1].split(")", 1)[0]
+        # 本轮只提交训练种子 0；种子 1、2 的配置已派生，扩数组时只改 TRAIN_SEEDS
+        self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), (0,))
         for group in ("flow_only", "flow_with_hull"):
-            for train_seed in (0, 1, 2):
-                suffix = "" if not train_seed else f"_train_seed{train_seed}"
-                path = (OFORMER_DIR /
-                        f"appsolver_oformer_{group}_random_seed0{suffix}_isoflops.yaml")
-                self.assertTrue(path.is_file(), path)
+            path = (OFORMER_DIR /
+                    f"appsolver_oformer_{group}_random_seed0_isoflops.yaml")
+            self.assertTrue(path.is_file(), path)
 
 
 class JointHullMetricTest(unittest.TestCase):
