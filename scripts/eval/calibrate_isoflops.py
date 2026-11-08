@@ -200,11 +200,30 @@ class Calibrator:
         return min(rows, key=lambda row: (abs(row[3]), self.change(row)))
 
 
+def train_block(text):
+    """配置文本里的整段 `train:`（含其下所有缩进行）。"""
+    lines = text.splitlines(keepends=True)
+    start = next(index for index, line in enumerate(lines) if line.startswith("train:"))
+    end = next((index for index in range(start + 1, len(lines))
+                if lines[index] and not lines[index][0].isspace()), len(lines))
+    return "".join(lines[start:end])
+
+
 def write_config(config_path, capacity, parameters, flops):
-    """按基础配置的行文写出等计算量配置：只改容量行与头注释。"""
+    """按基础配置的行文写出等计算量配置：只改容量行与头注释。
+
+    训练超参沿用既有等计算量配置：学习率等只针对该容量口径的覆盖项（APPSolver-v1 的
+    `1e-4`）不属于容量，从 `*_multihull_normal.yaml` 重写会静默丢掉。条目、统计量等与
+    基础配置的一致性由 `tests/test_isoflops.py` 逐项核对。
+    """
     template = load_config(config_path)
     text = "".join(line for line in Path(config_path).read_text().splitlines(keepends=True)
                    if not line.startswith("#"))
+    out = target_isoflops_path(config_path)
+    if out.is_file():
+        previous = "".join(line for line in out.read_text().splitlines(keepends=True)
+                           if not line.startswith("#"))
+        text = text.replace(train_block(text), train_block(previous), 1)
     for key, value in capacity.items():
         pattern = rf"(^  {key}: )(\S+)(.*)$"
         text, hits = re.subn(pattern, lambda match: f"{match.group(1)}{value}{match.group(3)}",
@@ -216,11 +235,10 @@ def write_config(config_path, capacity, parameters, flops):
                         if int(template["model"][key]) != int(value))
     header = (f"# {model_stem(config_path)}：等计算量（iso-FLOPs）对照，前向 {flops:.1f} GFLOPs、"
               f"{parameters / 1e6:.3f} M 参数\n"
-              "# 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、\n"
-              "# lambda_hull=0.0\n"
+              "# 主实验统一口径：自由液面 + 船体表面输入、流场与船面双域输出、逐层 Fourier add、\n"
+              "# lambda_hull=1.0\n"
               f"# 与 {Path(config_path).name} 的唯一差别是主干容量\n"
               f"# （{changes or '锚点不动'}），分词/潜网格与训练协议不变\n")
-    out = target_isoflops_path(config_path)
     out.write_text(header + text)
     return out
 

@@ -7,6 +7,7 @@ model:
   - hull
   output_domains:
   - flow
+  - hull
   flow_size_tiers:
   - - 0.05
     - 0.02
@@ -23,7 +24,7 @@ model:
   query_basis: siren
   fourier_features: 32
   fourier_scale: 4.0
-  conditioning: film        # film | adaln | adaln_zero
+  conditioning: fourier_add        # film | adaln | adaln_zero | fourier_add
   dropout: 0.0
 train:
   device: cuda
@@ -226,7 +227,7 @@ train:
   weight_decay: 0.0001
   batch_queries: 4096
   val_queries: 16384
-  lambda_hull: 0.0
+  lambda_hull: 1.0
   seed: 2
   val_entries:
   - containership_fr022_normal_mesh

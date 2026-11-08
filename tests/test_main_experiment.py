@@ -15,11 +15,11 @@
 - 全部配置共用单一种子 `seed=0`；多种子复跑从 `random_seed0` 派生 28 份
   `<模型>_random_seed0_train_seed{1,2}[_isoflops].yaml`，只改 `train.seed` 与头注释，
   数据划分、统计量、容量与训练预算逐项不变（文件名同时标注划分与训练种子）；
-- 训练数组脚本用 `TRAIN_SEEDS` 选训练种子：默认 `0` 保持原 9 元素行为，`TRAIN_SEEDS=1,2`
-  展开为 18 个元素（先种子、后模型），由 `--array=0-17%1` 提交；
-- 主表配置都真实生效：模型只输出流场、不构造船面输出头、船体几何与工况都改变
-  流场预测、损失只含流场项（`lambda_hull=0.0` 且模型没有 hull 输出域）；
-- 历史 KCS / 消融配置不被默认值静默改写：仍保留双域输出与 `lambda_hull=1.0`。
+- 训练数组脚本本轮只提交训练种子 0：`TRAIN_SEEDS=(0)`、`--array=0-6%2`，数组下标即
+  模型顺序；训练种子 1、2 的配置已由同一生成器派生，扩数组即可复跑；
+- 主表配置都真实生效：模型同时输出流场与船面 Cp（双域输出头都构造）、船体几何与
+  工况都改变流场预测、损失同时含流场项与 `lambda_hull=1.0` 的船面项；
+- 历史 KCS 配置不被默认值静默改写：仍保留双域输出与 `lambda_hull=1.0`。
 """
 
 import json
@@ -37,6 +37,8 @@ sys.path.insert(0, str(ROOT / "scripts" / "train"))
 
 from build import build_model  # noqa: E402
 from collate import collate_samples  # noqa: E402
+from conditioning import FourierAdd  # noqa: E402
+from losses import appsolver_loss  # noqa: E402
 from normalize import Normalizer  # noqa: E402
 from trainer import Trainer  # noqa: E402
 import make_split_configs  # noqa: E402
@@ -222,25 +224,27 @@ class MainConfigTest(unittest.TestCase):
                             self.assertEqual(derived["train"][key], value, key)
 
     def test_task_protocol_is_unified(self):
+        """主表口径：双域输入、流场 + 船面双域输出、逐层 Fourier add、lambda_hull=1.0。"""
         for _, capacity_suffix in CAPACITIES:
             for model in MODELS:
                 with self.subTest(model=model, capacity=capacity_suffix):
                     config = load(model, MAIN_SPLIT, capacity_suffix)
-                    self.assertEqual(config["model"]["output_domains"], ["flow"])
-                    self.assertEqual(config["model"]["conditioning"], "film")
-                    self.assertIn("hull", config["model"]["input_domains"])
-                    self.assertEqual(config["train"]["lambda_hull"], 0.0)
+                    self.assertEqual(config["model"]["input_domains"], ["flow", "hull"])
+                    self.assertEqual(config["model"]["output_domains"], ["flow", "hull"])
+                    self.assertEqual(config["model"]["conditioning"], "fourier_add")
+                    self.assertEqual(config["train"]["lambda_hull"], 1.0)
 
     def test_sbatch_covers_exactly_the_main_table(self):
-        """数组任务与主表一一对应：7 个模型 × 3 个训练种子、固定计算量容量。"""
+        """数组任务与主表一一对应：本轮 7 个模型 × 训练种子 0、固定计算量容量。"""
         text = SBATCH.read_text()
-        self.assertIn("--array=0-20%2", text)
+        self.assertIn("--array=0-6%2", text)
         self.assertIn(f'SPLIT="{MAIN_SPLIT}"', text)
         self.assertNotIn("CAPACITY", text)
         models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
         self.assertEqual(tuple(models_block.split()), MODELS)
         seeds_block = text.split("TRAIN_SEEDS=(", 1)[1].split(")", 1)[0]
-        self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), (0,) + TRAIN_SEEDS)
+        # 本轮只提交训练种子 0；种子 1、2 的配置已派生，扩数组时只改 TRAIN_SEEDS
+        self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), (0,))
         self.assertIn('_isoflops.yaml', text)
 
     def test_multiseed_configs_only_change_the_training_seed(self):
@@ -315,6 +319,7 @@ class CudaForwardTest(unittest.TestCase):
                 with torch.no_grad():
                     output = module(batch, queries)
                 self.assertEqual(tuple(output["flow"].shape), (1, 7, 5))
+                self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1))
                 self.assertEqual(output["flow"].device.type, "cuda")
                 del module
                 torch.cuda.empty_cache()
@@ -331,19 +336,20 @@ class UnifiedForwardTest(unittest.TestCase):
         cls.sample = synthetic_sample()
         cls.batch = collate_samples([cls.sample])
 
-    def test_only_the_flow_domain_is_constructed_and_returned(self):
+    def test_both_domains_are_constructed_and_returned(self):
         queries = queries_from(self.batch)
         for model, module in self.models.items():
             with self.subTest(model=model):
                 output = module(self.batch, queries)
-                self.assertEqual(set(output), {"flow"})
+                self.assertEqual(set(output), {"flow", "hull"})
                 self.assertEqual(tuple(output["flow"].shape), (1, 7, 5))
-                self.assertEqual(tuple(module.output_domains), ("flow",))
-                # 船面输入投影保留（双域输入），船面输出头不应被构造
+                self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1))
+                self.assertEqual(tuple(module.output_domains), ("flow", "hull"))
+                # 船面输出头必须真实构造（主实验同时预测流场与表面压力）
                 hull_parameters = [name for name, _ in module.named_parameters()
                                    if name.startswith(("hull_head", "hull_patches",
                                                        "hull_extra"))]
-                self.assertEqual(hull_parameters, [])
+                self.assertNotEqual(hull_parameters, [])
 
     def test_hull_geometry_and_condition_change_the_flow_prediction(self):
         queries = queries_from(self.batch)
@@ -356,13 +362,20 @@ class UnifiedForwardTest(unittest.TestCase):
                     shifted = module(moved, queries)["flow"]
                 self.assertGreater(float((shifted - baseline).abs().max()), 0.0)
 
+                # `fourier_add` 的投影零初始化，训练前工况对输出无影响；这里把投影改成
+                # 非零权重，模拟训练后的状态，检验逐层加性注入确实接到前向上。
+                fourier = [item for item in module.modules() if isinstance(item, FourierAdd)]
+                self.assertNotEqual(fourier, [])
+                for item in fourier:
+                    torch.nn.init.normal_(item.projection.weight, std=0.1)
+                baseline = module(self.batch, queries)["flow"]
                 conditioned = perturbed(self.batch, "condition",
                                         torch.tensor([[0.32, 9.1]]))
                 with torch.no_grad():
                     changed = module(conditioned, queries)["flow"]
                 self.assertGreater(float((changed - baseline).abs().max()), 0.0)
 
-    def test_flow_only_loss_has_no_hull_term(self):
+    def test_joint_loss_includes_the_hull_term(self):
         for model, module in self.models.items():
             with self.subTest(model=model):
                 trainer = object.__new__(Trainer)
@@ -370,12 +383,15 @@ class UnifiedForwardTest(unittest.TestCase):
                 trainer.normalizer = unit_normalizer()
                 trainer.device = torch.device("cpu")
                 trainer.domains = tuple(module.output_domains)
-                trainer.config = {"lambda_hull": 0.0}
+                trainer.config = {"lambda_hull": 1.0}
                 index = torch.stack([torch.arange(7), torch.zeros(7, dtype=torch.long)],
                                     dim=-1)
                 _, flow, hull = trainer._forward(self.sample, index)
-                self.assertIsNone(hull)
                 self.assertIsNotNone(flow)
+                self.assertIsNotNone(hull)
+                losses = appsolver_loss(flow, hull, trainer.config["lambda_hull"])
+                self.assertAlmostEqual(float(losses["total"]),
+                                       float(losses["flow"] + losses["hull"]), places=6)
 
     def test_historical_configs_still_predict_both_domains(self):
         """历史 KCS / 联合训练配置保持双域输出（模型构造与转发的回归）。"""
@@ -393,12 +409,13 @@ class UnifiedForwardTest(unittest.TestCase):
                 self.assertEqual(tuple(output["flow"].shape), (1, 7, 5))
                 self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1))
 
-    def test_gradients_reach_every_parameter_of_the_flow_task(self):
+    def test_gradients_reach_every_parameter_of_the_joint_task(self):
         queries = queries_from(self.batch)
         for model, module in self.models.items():
             with self.subTest(model=model):
                 module.zero_grad(set_to_none=True)
-                module(self.batch, queries)["flow"].sum().backward()
+                output = module(self.batch, queries)
+                (output["flow"].sum() + output["hull"].sum()).backward()
                 missing = [name for name, parameter in module.named_parameters()
                            if parameter.grad is None]
                 self.assertEqual(missing, [])

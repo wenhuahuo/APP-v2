@@ -1,5 +1,6 @@
 # APP 主线（APP 分词 + 自建主干）：4 船型训练 / 2 船型验证的多船型数据集（normal 网格）
-# 主实验统一口径：自由液面 + 船体表面输入、仅流场输出、逐层 FiLM、lambda_hull=0.0
+# 主实验统一口径：自由液面 + 船体表面输入、流场与船面双域输出、逐层 Fourier add、
+# lambda_hull=1.0
 stats: dataset/shipbench/stats.json
 model_type: appsolver_v2
 model:
@@ -8,6 +9,7 @@ model:
   - hull
   output_domains:
   - flow
+  - hull
   flow_size_tiers:
   - - 0.05
     - 0.02
@@ -24,7 +26,7 @@ model:
   query_basis: siren
   fourier_features: 32
   fourier_scale: 4.0
-  conditioning: film        # film | adaln | adaln_zero
+  conditioning: fourier_add        # film | adaln | adaln_zero | fourier_add
   dropout: 0.0
 train:
   device: cuda
@@ -41,7 +43,7 @@ train:
   weight_decay: 0.0001
   batch_queries: 4096
   val_queries: 16384
-  lambda_hull: 0.0
+  lambda_hull: 1.0
   seed: 0
   val_entries:
   - s175_fr029_normal_mesh

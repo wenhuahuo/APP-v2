@@ -7,8 +7,9 @@ model:
   - hull
   output_domains:
   - flow
-  conditioning: film
-  d_model: 224
+  - hull
+  conditioning: fourier_add
+  d_model: 232
   nhead: 8
   layers: 2
   latents: 128
@@ -215,7 +216,7 @@ train:
   weight_decay: 0.0001
   batch_queries: 4096
   val_queries: 16384
-  lambda_hull: 0.0
+  lambda_hull: 1.0
   seed: 2
   val_entries:
   - containership_fr022_normal_mesh
