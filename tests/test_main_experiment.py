@@ -15,8 +15,8 @@
 - 全部配置共用单一种子 `seed=0`；多种子复跑从 `random_seed0` 派生 28 份
   `<模型>_random_seed0_train_seed{1,2}[_isoflops].yaml`，只改 `train.seed` 与头注释，
   数据划分、统计量、容量与训练预算逐项不变（文件名同时标注划分与训练种子）；
-- 训练数组脚本本轮只提交训练种子 0：`TRAIN_SEEDS=(0)`、`--array=0-6%2`，数组下标即
-  模型顺序；训练种子 1、2 的配置已由同一生成器派生，扩数组即可复跑；
+- 训练数组脚本本轮只补训练种子 1、2：`TRAIN_SEEDS=(1 2)`、`--array=0-13%2`，数组按
+  先种子、后模型展开；种子 0 的 7 个 run 已在上一轮完成，不重跑；
 - 主表配置都真实生效：模型同时输出流场与船面 Cp（双域输出头都构造）、船体几何与
   工况都改变流场预测、损失同时含流场项与 `lambda_hull=1.0` 的船面项；
 - 历史 KCS 配置不被默认值静默改写：仍保留双域输出与 `lambda_hull=1.0`。
@@ -235,17 +235,19 @@ class MainConfigTest(unittest.TestCase):
                     self.assertEqual(config["train"]["lambda_hull"], 1.0)
 
     def test_sbatch_covers_exactly_the_main_table(self):
-        """数组任务与主表一一对应：本轮 7 个模型 × 训练种子 0、固定计算量容量。"""
+        """数组任务与主表一一对应：7 个模型 × 训练种子 1/2、固定计算量容量（种子 0 已完成）。"""
         text = SBATCH.read_text()
-        self.assertIn("--array=0-6%2", text)
+        self.assertIn("--array=0-13%2", text)
+        self.assertIn("--job-name=main-isoflops-seed12", text)
         self.assertIn(f'SPLIT="{MAIN_SPLIT}"', text)
         self.assertNotIn("CAPACITY", text)
         models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
         self.assertEqual(tuple(models_block.split()), MODELS)
         seeds_block = text.split("TRAIN_SEEDS=(", 1)[1].split(")", 1)[0]
-        # 本轮只提交训练种子 0；种子 1、2 的配置已派生，扩数组时只改 TRAIN_SEEDS
-        self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), (0,))
-        self.assertIn('_isoflops.yaml', text)
+        # 本轮只提交训练种子 1、2；种子 0 复用上一轮的 run，不重跑
+        self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), TRAIN_SEEDS)
+        self.assertIn("_isoflops.yaml", text)
+        self.assertIn("_train_seed${TRAIN_SEED}_isoflops.yaml", text)
 
     def test_multiseed_configs_only_change_the_training_seed(self):
         """28 份多种子配置：划分、统计量、容量与训练预算与 seed0 逐项一致，只改 train.seed。"""
