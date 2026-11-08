@@ -5,8 +5,9 @@
 因此换查询密度不随之调整。
 
 给出 `input_domains` 时流场与船面点云拼成同一片点云联合编码（船体几何因此进入流场
-预测），`conditioning: film` 在 block 入口做逐层 FiLM；缺省时保持历史口径的独立编码
-与工况加性偏置。
+预测），`conditioning: fourier_add`（主实验口径）/ `film` 在 block 入口做逐层工况注入
+（`point_cloud.token_modulation`，与 APPSolver-v2 同一套公式）；缺省时保持历史口径的
+独立编码与工况加性偏置。
 """
 
 import torch

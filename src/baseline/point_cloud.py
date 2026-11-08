@@ -4,9 +4,10 @@
 
 - 历史口径（不给 `input_domains` / `output_domains` / `conditioning`）：流场与船面
   各自独立编码，输出流场与船面两个域，工况以加性偏置加进输入嵌入；
-- 主实验口径（`input_domains: [flow, hull]`、`output_domains: [flow]`、
-  `conditioning: film`）：两个输入域拼成同一片点云联合编码，船体几何因此真实影响
-  流场预测；工况在没有自注意力的块入口做逐层 FiLM（与 APPSolver-v2 同一公式）。
+- 主实验口径（`input_domains: [flow, hull]`、`output_domains: [flow, hull]`、
+  `conditioning: fourier_add`）：两个输入域拼成同一片点云联合编码，船体几何因此真实
+  影响流场预测；工况在没有自注意力的块入口做逐层 Fourier 加性注入（与 APPSolver-v2
+  同一公式，`conditioning: film` 仍保留为逐层 FiLM 的消融档）。
 
 批大小固定为 1：训练每步只用一条数据集条目（`collate_samples([sample])`）。
 需要分辨率无关查询的模型（UPT / GINO / CORAL / OFormer）从查询坐标解码，不经过
@@ -22,7 +23,7 @@ import math
 import torch
 import torch.nn as nn
 
-from conditioning import FiLM, NoConditioning
+from conditioning import FiLM, FourierAdd, NoConditioning
 
 FLOW_FEATURES = ("x", "y")
 HULL_FEATURES = ("u", "v", "x", "y", "z", "nx", "ny", "nz")
@@ -93,14 +94,21 @@ def normalize_within(coords, low, span):
 
 
 def token_modulation(kind, condition_dim, d_model):
-    """块入口的工况调制：`film` 为逐层独立参数的 FiLM，其余（含 `None`）不调制。"""
-    return FiLM(condition_dim, d_model) if kind == "film" else NoConditioning()
+    """块入口的工况调制：`film` 为逐层独立参数的 FiLM，`fourier_add` 为逐层零初始化
+    Fourier 加性偏置（与 APPSolver-v2 共用 `conditioning.FourierAdd`），其余不调制。"""
+    if kind == "film":
+        return FiLM(condition_dim, d_model)
+    if kind == "fourier_add":
+        return FourierAdd(condition_dim, d_model)
+    return NoConditioning()
 
 
 def apply_modulation(tokens, modulation, condition):
-    """FiLM 的块入口形式 `x·(1+γ)+β`；无调制时原样返回。"""
+    """块入口的工况调制：FiLM 为 `x·(1+γ)+β`，Fourier add 为 `x + c`，无调制时原样返回。"""
     if isinstance(modulation, NoConditioning):
         return tokens
+    if isinstance(modulation, FourierAdd):
+        return tokens + modulation(condition)
     gamma, beta = modulation(condition)
     return tokens * (1.0 + gamma[:, None]) + beta[:, None]
 

@@ -50,7 +50,9 @@ class APPSolverGNOT(nn.Module):
 
     @staticmethod
     def _init_weights(module):
-        if isinstance(module, nn.Linear):
+        # `zero_init` 的 Linear（`conditioning.FourierAdd` 的投影）保持零初始化，
+        # 使工况加性注入在初始时不改变网络。
+        if isinstance(module, nn.Linear) and not getattr(module, "zero_init", False):
             nn.init.trunc_normal_(module.weight, std=0.02)
             nn.init.zeros_(module.bias)
 

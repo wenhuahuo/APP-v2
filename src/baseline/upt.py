@@ -12,9 +12,9 @@ latent 数量固定，输入点数变化时表征容量不变；解码只依赖�
 输入密度上编码一次、在任意密度与位置的查询点集上解码。`encode` / `decode` 分开
 暴露，评测据此保证换查询密度时不重跑编码器。
 
-工况默认走历史口径（加性偏置）；配置给出 `conditioning: film` 时编码器块与解码器块
-按 APPSolver-v2 的公式做逐层 FiLM。给出 `input_domains: [flow, hull]` 时两个输入域
-联合编码，否则保持历史口径的独立编码。
+工况默认走历史口径（加性偏置）；配置给出 `conditioning: fourier_add`（主实验口径）或
+`film` 时编码器块与解码器块按 APPSolver-v2 的公式做逐层工况注入。给出
+`input_domains: [flow, hull]` 时两个输入域联合编码，否则保持历史口径的独立编码。
 """
 
 import torch.nn as nn

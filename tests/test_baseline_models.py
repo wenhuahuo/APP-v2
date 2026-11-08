@@ -21,6 +21,7 @@ for name in ("datapipe", "app", "baseline", "model", "eval"):
 from app_v1 import APPSolverV1Baseline, point_patches  # noqa: E402
 from build import build_model  # noqa: E402
 from collate import collate_samples  # noqa: E402
+from conditioning import FourierAdd  # noqa: E402
 from gnot import GNOTBaseline  # noqa: E402
 from oformer import OFormerBaseline  # noqa: E402
 from point_cloud import joint_cloud, lattice_index  # noqa: E402
@@ -180,6 +181,59 @@ class BaselineForwardTest(unittest.TestCase):
             self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1), name)
             output["flow"].sum().backward()
             self.assertTrue(any(p.grad is not None for p in model.parameters()), name)
+
+
+class PointCloudConditioningTest(unittest.TestCase):
+    """基线点云主干的 `fourier_add` 与 APPSolver-v2 共用同一公式（逐层零初始化加性注入）。"""
+
+    def models(self):
+        """主实验口径（双域输入 + 双域输出 + fourier_add）下的四个点云基线。"""
+        return {
+            "gnot": (GNOTBaseline(d_model=24, nhead=4, layers=2, mlp_ratio=2, n_experts=2,
+                                  input_domains=("flow", "hull"),
+                                  output_domains=("flow", "hull"),
+                                  conditioning="fourier_add"), 2),
+            "transolver": (TransolverBaseline(d_model=24, nhead=4, layers=2, slices=8,
+                                              mlp_ratio=2, input_domains=("flow", "hull"),
+                                              output_domains=("flow", "hull"),
+                                              conditioning="fourier_add"), 2),
+            "upt": (UPTBaseline(d_model=24, nhead=4, layers=2, latents=16, mlp_ratio=2,
+                                input_domains=("flow", "hull"),
+                                output_domains=("flow", "hull"),
+                                conditioning="fourier_add"), 3),
+            "appsolver_v1": (APPSolverV1Baseline(patch_size=8, d_model=24, nhead=4, layers=2,
+                                                 mlp_ratio=2, max_patches=64,
+                                                 input_domains=("flow", "hull"),
+                                                 output_domains=("flow", "hull"),
+                                                 conditioning="fourier_add"), 2),
+        }
+
+    def test_every_block_gets_a_zero_initialised_fourier_add(self):
+        for name, (model, blocks) in self.models().items():
+            with self.subTest(model=name):
+                # fourier_add 不走整模型工况偏置，块内逐层加性注入是唯一入口
+                self.assertIsNone(model.condition)
+                modulations = [module for module in model.modules()
+                               if isinstance(module, FourierAdd)]
+                self.assertEqual(len(modulations), blocks)
+                for modulation in modulations:
+                    self.assertEqual(float(modulation.projection.weight.abs().max()), 0.0)
+                    self.assertEqual(float(modulation.projection.bias.abs().max()), 0.0)
+
+    def test_condition_reaches_the_output_once_the_projection_is_nonzero(self):
+        batch = fake_batch()
+        queries = batch["flow_coords"].reshape(-1, 2)[:QUERIES][None]
+        for name, (model, _) in self.models().items():
+            with self.subTest(model=name):
+                model.eval()
+                for modulation in model.modules():
+                    if isinstance(modulation, FourierAdd):
+                        torch.nn.init.normal_(modulation.projection.weight, std=0.1)
+                with torch.no_grad():
+                    baseline = model(batch, queries)["flow"]
+                    changed = model({**batch, "condition": torch.tensor([[0.32, 9.1]])},
+                                    queries)["flow"]
+                self.assertGreater(float((changed - baseline).abs().max()), 0.0)
 
 
 class HybridForwardTest(unittest.TestCase):

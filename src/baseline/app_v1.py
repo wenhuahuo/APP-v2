@@ -5,8 +5,9 @@ v1 的分词判据是 patch 内点数，patch 顺序带有可学习的位置嵌�
 维度都不再对应，因此换查询密度不随之调整。
 
 给出 `input_domains` 时流场与船面点云先用共享的双域嵌入投影，再拼成同一片点云按点数
-分 patch（船体几何因此进入流场预测），`conditioning: film` 在每层 transformer 之前做
-逐层 FiLM；缺省时保持历史口径的独立编码与工况加性偏置。
+分 patch（船体几何因此进入流场预测），`conditioning: fourier_add`（主实验口径）/ `film`
+在每层 transformer 之前做逐层工况注入（`point_cloud.token_modulation`）；缺省时保持历史
+口径的独立编码与工况加性偏置。
 """
 
 import numpy as np

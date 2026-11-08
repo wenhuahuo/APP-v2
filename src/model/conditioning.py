@@ -70,6 +70,9 @@ class FourierAdd(nn.Module):
         self.projection = nn.Linear(2 * n_features, d_model)
         nn.init.zeros_(self.projection.weight)
         nn.init.zeros_(self.projection.bias)
+        # 通用的逐模块权重初始化（如 GNOT 的 `self.apply(_init_weights)`）会把投影当普通
+        # Linear 重置；打上标记让这些初始化函数跳过，保住「初始加性项为零」。
+        self.projection.zero_init = True
 
     def forward(self, condition):
         return self.projection(self.encoding(condition))[:, None]
