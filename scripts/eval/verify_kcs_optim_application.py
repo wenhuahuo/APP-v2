@@ -1,6 +1,7 @@
-"""KCS 艏部 FFD 变体的下游验证：joint_flow_hull 模型的船面 Cp 积分 vs 新全量 CFD。
+"""KCS 艏部 FFD 变体的下游验证：APP+OFormer 的船面 Cp 积分 vs 新全量 CFD。
 
-用新全量数据训练的 `appsolver_oformer_joint_flow_hull_random_seed0_isoflops`（含船面输出头）
+用主实验口径训练的 `appsolver_oformer_random_seed0_isoflops`（双域输入/输出、逐层 Fourier add、
+`lambda_hull=1.0`，含船面输出头）
 在基准 KCS 与两个 FFD 变体上预测船面 Cp，沿半船湿表面做轴向压力积分，得到全船压差阻力，
 与三个算例 `force.dat` 的 20–25 s 窗口压力项对照。几何对应、FFD 点变形、法向/求积权重更新、
 变体水线 SDF 与积分口径全部复用 `probe_kcs_ffd_pressure.py`，本脚本只做本轮的 CFD 读数、
@@ -58,8 +59,11 @@ from probe_kcs_ffd_pressure import (  # noqa: E402
 from build import build_model  # noqa: E402
 
 ENTRY = "kcs_fr026_normal_mesh"
-MODEL_RUN = "appsolver_oformer_joint_flow_hull_random_seed0_isoflops"
-CHECKPOINT = ROOT / "output" / MODEL_RUN / "best.pt"
+MODEL_RUN = "appsolver_oformer_random_seed0_isoflops"
+# 该 run 的产物在归档目录（同名活跃目录被移走后 NFS 缓存仍解析到旧位置）
+MODEL_DIR = (ROOT / "output" / "archive" / "pre_dual_domain_fourier_add"
+             / f"{MODEL_RUN}__archived_20261108_134104")
+CHECKPOINT = MODEL_DIR / "best.pt"
 STATS = ROOT / "dataset" / "shipbench" / "stats_random_seed0.json"
 VARIANTS = ROOT / "dataset" / "kcs_var"
 DEFAULT_DATA_ROOT = Path(
