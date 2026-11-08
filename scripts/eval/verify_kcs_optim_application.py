@@ -5,7 +5,7 @@
 在基准 KCS 与两个 FFD 变体上预测船面 Cp，沿半船湿表面做轴向压力积分，得到全船压差阻力，
 与三个算例 `force.dat` 的 20–25 s 窗口压力项对照。几何对应、FFD 点变形、法向/求积权重更新、
 变体水线 SDF 与积分口径全部复用 `probe_kcs_ffd_pressure.py`，本脚本只做本轮的 CFD 读数、
-相对/绝对误差与最小积分核验。
+相对/绝对误差、最小积分核验与船面 Cp 误差的轴向分档。
 
 CFD 口径（见数据集 `AGENT.md` 与 `calib/README.md`）
 --------------------------------------------------
@@ -172,6 +172,35 @@ def axis_factor(normals, weights):
     return 2.0 * float((np.abs(normals[:, 0]) * weights).sum())
 
 
+# 船面 Cp 误差的分档（x/Lpp）：阻力积分按 |n_x|A 加权，轴向投影集中在艏艉，
+# 与按面积加权的 RMSE 不同权；边界取 KCS 艏部曲率段与艉部压力恢复段的起点
+ERROR_BANDS = (("bow", "<0.25", -math.inf, 0.25),
+               ("mid", "0.25–0.77", 0.25, 0.77),
+               ("stern", ">0.77", 0.77, math.inf))
+
+
+def error_localization(cp, truth, surface, x_over_lpp, pressure_scale):
+    """按 x/Lpp 分档给出 Cp 误差的面积份额、轴向投影份额与阻力积分误差。"""
+    residual = cp - truth
+    axis, weights = surface["normals"][:, 0], surface["weights"]
+    total_axis = float((np.abs(axis) * weights).sum())
+    rows = {}
+    for name, label, low, high in ERROR_BANDS:
+        mask = (x_over_lpp >= low) & (x_over_lpp < high)
+        area = weights[mask]
+        rows[name] = {
+            "x_over_lpp": label,
+            "area_fraction": float(area.sum() / weights.sum()),
+            "axial_projection_fraction": float(
+                (np.abs(axis[mask]) * area).sum() / total_axis),
+            "cp_rmse": float(math.sqrt((residual[mask] ** 2 * area).sum() / area.sum())),
+            "cp_mae": float((np.abs(residual[mask]) * area).sum() / area.sum()),
+            "resistance_error_N": -2.0 * pressure_scale * float(
+                (residual[mask] * axis[mask] * area).sum()),
+        }
+    return rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset-root", type=Path, default=DEFAULT_DATA_ROOT,
@@ -232,6 +261,9 @@ def main():
             item["cp_mae_vs_cfd_label"] = float(
                 (np.abs(cp - truth) * surface["weights"]).sum()
                 / surface["weights"].sum())
+            item["error_localization"] = error_localization(
+                cp, truth, surface,
+                sample["hull_points"].numpy()[:, 0].astype(np.float64), pressure_scale)
         item["cfd_pressure_resistance_N"] = cfd_results[hull]["resistance_pressure_N"]
         item["cfd_pressure_cd_S0"] = cfd_results[hull]["cd_pressure_S0"]
         item["abs_error_N"] = item["resistance_full_ship_N"] - item["cfd_pressure_resistance_N"]
