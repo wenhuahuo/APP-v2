@@ -168,10 +168,12 @@ class MigrationForwardTest(unittest.TestCase):
         for model, module in self.models.items():
             with self.subTest(model=model):
                 module.frontend.flow_size_tiers = FINE_TIERS
-                output = module(self.batch, self.queries)["flow"]
-                self.assertEqual(tuple(output.shape), (1, QUERIES, 5))
-                self.assertTrue(bool(torch.isfinite(output).all()))
-                output.sum().backward()
+                output = module(self.batch, self.queries)
+                self.assertEqual(tuple(output["flow"].shape), (1, QUERIES, 5))
+                self.assertEqual(tuple(output["hull"].shape), (1, HULL_POINTS, 1))
+                self.assertTrue(bool(torch.isfinite(output["flow"]).all()))
+                # 迁移模型沿用主实验口径（流场 + 船面双域输出），两个域一起反传
+                (output["flow"].sum() + output["hull"].sum()).backward()
                 missing = [name for name, parameter in module.named_parameters()
                            if parameter.grad is None]
                 self.assertEqual(missing, [])

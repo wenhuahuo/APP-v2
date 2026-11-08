@@ -15,7 +15,7 @@
     python3 scripts/eval/summarize_app_oformer_ablations.py --kind conditioning \
         --json output/app_oformer_conditioning_ablation_summary.json
 
-对照组（`flow_with_hull` / `adaptive` / `film`）都是
+对照组（`joint_flow_hull` / `adaptive` / `fourier_add`）都是
 `appsolver_oformer_random_seed0[_train_seed1/2]_isoflops`，与主实验的 APP+OFormer 是同一批
 run，不重复训练。
 """
@@ -38,10 +38,10 @@ VARIANTS = {
     "hull_fusion": (
         ("flow_only", "appsolver_oformer_flow_only", False,
          "只输入自由液面点云，输出流场"),
-        ("flow_with_hull", "appsolver_oformer", True,
-         "输入自由液面 + 船体湿表面，只输出流场（默认口径）"),
-        ("joint_flow_hull", "appsolver_oformer_joint_flow_hull", False,
-         "输入双域，同时输出流场与船面 Cp，lambda_hull = 1.0"),
+        ("flow_with_hull", "appsolver_oformer_flow_with_hull", False,
+         "输入自由液面 + 船体湿表面，只输出流场"),
+        ("joint_flow_hull", "appsolver_oformer", True,
+         "输入双域，同时输出流场与船面 Cp，lambda_hull = 1.0（默认口径）"),
     ),
     "partition": (
         ("adaptive", "appsolver_oformer", True,
@@ -52,11 +52,11 @@ VARIANTS = {
          "学习得到的 512 个潜 token"),
     ),
     "conditioning": (
-        ("film", "appsolver_oformer", True, "逐层 FiLM（默认口径）"),
+        ("film", "appsolver_oformer_conditioning_film", False, "逐层 FiLM"),
         ("none", "appsolver_oformer_conditioning_none", False, "不输入工况"),
         ("adaln_zero", "appsolver_oformer_conditioning_adaln_zero", False, "adaLN-Zero 调制"),
-        ("fourier_add", "appsolver_oformer_conditioning_fourier_add", False,
-         "Fourier 加性编码"),
+        ("fourier_add", "appsolver_oformer", True,
+         "Fourier 加性编码（默认口径）"),
         ("cond_token", "appsolver_oformer_conditioning_cond_token", False, "条件 token 拼接"),
         ("cond_xattn", "appsolver_oformer_conditioning_cond_xattn", False,
          "条件交叉注意力"),

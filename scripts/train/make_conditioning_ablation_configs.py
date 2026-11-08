@@ -10,8 +10,8 @@
   仓库中已提交的六份配置来自 207 条快照的历史结果，重新运行 `--target v2` 会用当前
   快照覆盖它们。
 - APP+OFormer（`random_seed0` 划分，固定 GFLOPs 容量）：基础配置
-  `appsolver_oformer_random_seed0_isoflops.yaml` 本身是 `film` 组（已有训练结果，
-  生成器不重写它），只派生其余五种，各含训练种子 0/1/2。
+  `appsolver_oformer_random_seed0_isoflops.yaml` 本身是 `fourier_add` 组（主实验默认口径，
+  已有训练结果，生成器不重写它），只派生其余五种，各含训练种子 0/1/2。
 
     python3 scripts/train/make_conditioning_ablation_configs.py            # APPSolver-v2
     python3 scripts/train/make_conditioning_ablation_configs.py --target oformer
@@ -33,8 +33,8 @@ METHODS = ("none", "film", "adaln_zero", "fourier_add", "cond_token", "cond_xatt
 CLASSIC_HULL_COUNT = 11
 OFORMER_DIR = ROOT / "configs" / "appsolver_oformer"
 OFORMER_BASE = OFORMER_DIR / "appsolver_oformer_random_seed0_isoflops.yaml"
-# `film` 组就是基础配置本身，只派生其余五种。
-OFORMER_METHODS = tuple(method for method in METHODS if method != "film")
+# `fourier_add` 组就是基础配置本身（主实验默认口径），只派生其余五种。
+OFORMER_METHODS = tuple(method for method in METHODS if method != "fourier_add")
 
 
 def bullet_block(text, key, items):
@@ -79,8 +79,8 @@ def v2_configs():
 def oformer_configs():
     """APP+OFormer 固定 GFLOPs 容量的五组配置：{文件名: {种子: 文本}}。"""
     base_text = OFORMER_BASE.read_text()
-    if "  conditioning: film\n" not in base_text:
-        raise RuntimeError(f"{OFORMER_BASE.name} 不是 film 组")
+    if "  conditioning: fourier_add\n" not in base_text:
+        raise RuntimeError(f"{OFORMER_BASE.name} 不是 fourier_add 组")
     base = "".join(line for line in base_text.splitlines(keepends=True)
                    if not line.startswith("#"))
     configs = {}
@@ -90,7 +90,7 @@ def oformer_configs():
                   f"其余超参与 {OFORMER_BASE.name} 一致\n")
         seed_texts = {}
         for train_seed in (0, *make_split_configs.TRAIN_SEEDS):
-            text = header + base.replace("  conditioning: film\n",
+            text = header + base.replace("  conditioning: fourier_add\n",
                                          f"  conditioning: {method}\n", 1)
             if train_seed:
                 text = make_split_configs.derive_train_seed_from_text(

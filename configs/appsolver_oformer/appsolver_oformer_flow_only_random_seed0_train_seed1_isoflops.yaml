@@ -6,7 +6,7 @@ model:
   - flow
   output_domains:
   - flow
-  conditioning: film
+  conditioning: fourier_add
   flow_size_tiers:
   - - 0.05
     - 0.02

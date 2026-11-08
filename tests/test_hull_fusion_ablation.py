@@ -3,8 +3,8 @@
 判别点：
 
 - 三份配置由 `make_framework_ablation_configs.py` 确定性派生：`flow_only` 与
-  `joint_flow_hull` 与既有 `flow_with_hull` 主配置（`appsolver_oformer_random_seed0_isoflops`）
-  只差输入域、输出域与 `lambda_hull`，其余模型/训练字段逐项相同；
+  `flow_with_hull` 与主实验配置（`appsolver_oformer_random_seed0_isoflops`，即
+  `joint_flow_hull` 组）只差输入域、输出域与 `lambda_hull`，其余模型/训练字段逐项相同；
 - `flow_only` 只拼流场 token：扰动船体输入（船面点、法向、UV、压力）后预测不变，
   且船体投影不参与反传；
 - `flow_with_hull` 与 `joint_flow_hull` 的预测随船体输入变化；只有联合模型构造船面输出头；
@@ -33,8 +33,9 @@ import make_framework_ablation_configs as configs  # noqa: E402
 
 OFORMER_DIR = ROOT / "configs" / "appsolver_oformer"
 FLOW_ONLY = "appsolver_oformer_flow_only_random_seed0_isoflops.yaml"
-FLOW_WITH_HULL = "appsolver_oformer_random_seed0_isoflops.yaml"
-JOINT = "appsolver_oformer_joint_flow_hull_random_seed0_isoflops.yaml"
+FLOW_WITH_HULL = "appsolver_oformer_flow_with_hull_random_seed0_isoflops.yaml"
+# 联合预测就是主实验默认口径，直接复用主实验配置（不另写一份 joint 配置）
+JOINT = "appsolver_oformer_random_seed0_isoflops.yaml"
 NX, NY, HULL_POINTS, QUERIES = 17, 9, 40, 7
 
 
@@ -78,7 +79,7 @@ def perturb_hull(batch, scale=3.0):
 class HullFusionConfigTest(unittest.TestCase):
     def test_derived_configs_match_the_generator(self):
         derived = configs.oformer_variants()
-        self.assertEqual(set(derived), {FLOW_ONLY, JOINT})
+        self.assertEqual(set(derived), {FLOW_ONLY, FLOW_WITH_HULL})
         for filename, seed_texts in derived.items():
             self.assertEqual(set(seed_texts), {0, 1, 2})
             for train_seed, text in seed_texts.items():
@@ -89,12 +90,12 @@ class HullFusionConfigTest(unittest.TestCase):
                     self.assertEqual((OFORMER_DIR / name).read_text(), text)
 
     def test_variants_only_change_the_task_protocol(self):
-        base = load(FLOW_WITH_HULL)
+        base = load(JOINT)
         self.assertEqual(base["model"]["input_domains"], ["flow", "hull"])
-        self.assertEqual(base["model"]["output_domains"], ["flow"])
-        self.assertEqual(base["train"]["lambda_hull"], 0.0)
+        self.assertEqual(base["model"]["output_domains"], ["flow", "hull"])
+        self.assertEqual(base["train"]["lambda_hull"], 1.0)
         expected = {"flow_only": (["flow"], ["flow"], 0.0),
-                    "joint_flow_hull": (["flow", "hull"], ["flow", "hull"], 1.0)}
+                    "flow_with_hull": (["flow", "hull"], ["flow"], 0.0)}
         for group, (inputs, outputs, lambda_hull) in expected.items():
             for train_seed in (0, 1, 2):
                 filename = (f"appsolver_oformer_{group}_random_seed0_isoflops.yaml"
@@ -125,14 +126,14 @@ class HullFusionConfigTest(unittest.TestCase):
 
 
 class HullFusionSbatchTest(unittest.TestCase):
-    """数组 0-5：flow_only / joint_flow_hull 各三个训练种子，与配置一一对应。"""
+    """数组 0-5：flow_only / flow_with_hull 各三个训练种子，与配置一一对应。"""
 
     def test_array_covers_six_runs(self):
         text = (ROOT / "scripts" / "train" /
                 "train_app_oformer_hull_fusion.sbatch").read_text()
         self.assertIn("--array=0-5%1", text)
         self.assertIn("--job-name=app-oformer-hull-fusion", text)
-        for group in ("flow_only", "joint_flow_hull"):
+        for group in ("flow_only", "flow_with_hull"):
             for train_seed in (0, 1, 2):
                 suffix = "" if not train_seed else f"_train_seed{train_seed}"
                 path = (OFORMER_DIR /

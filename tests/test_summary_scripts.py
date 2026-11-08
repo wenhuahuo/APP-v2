@@ -44,7 +44,8 @@ SPLITS = {
                        "counts": {"train": 4, "val": 3},
                        "train": ["t0", "t1", "t2", "t3"], "val": ["v0", "v1", "v2"]},
 }
-JOINT = ablations.run_name("appsolver_oformer_joint_flow_hull", 0)
+# 联合预测组就是主实验默认口径，run 名与主实验 APP+OFormer 相同
+JOINT = ablations.run_name("appsolver_oformer", 0)
 
 
 def channel_values(seed, entry_index):
@@ -131,8 +132,9 @@ def build_fixture(root):
         for _, prefix, _, _ in variants:
             for seed in SEEDS:
                 run = ablations.run_name(prefix, seed)
-                fixture.add(run, "random_seed0", seed, with_hull="joint_flow_hull" in run,
-                            parameters=1_000)
+                # 只有联合预测组（主实验口径）有船面指标
+                is_joint = run.startswith(ablations.run_name("appsolver_oformer", seed))
+                fixture.add(run, "random_seed0", seed, with_hull=is_joint, parameters=1_000)
     return fixture
 
 
@@ -242,7 +244,7 @@ class AggregationTest(unittest.TestCase):
         self.assertIn("hull", joint)
         self.assertGreater(joint["hull"]["cp_r2"], 0.0)
         plain = runs.run_metrics(
-            self.root, ablations.run_name("appsolver_oformer", 0))
+            self.root, ablations.run_name("appsolver_oformer_flow_only", 0))
         self.assertNotIn("hull", plain)
 
 
@@ -331,9 +333,9 @@ class CommandLineTest(unittest.TestCase):
                     if row["variant"] != reference:
                         self.assertIn("contrast", row)
                         self.assertEqual(row["contrast"]["reference"],
-                                         {"hull_fusion": "flow_with_hull",
+                                         {"hull_fusion": "joint_flow_hull",
                                           "partition": "adaptive",
-                                          "conditioning": "film"}[kind])
+                                          "conditioning": "fourier_add"}[kind])
         joint = [row for row in self.load("hull.json")["variants"]
                  if row["variant"] == "joint_flow_hull"][0]
         self.assertIn("hull", joint)

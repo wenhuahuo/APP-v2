@@ -1,8 +1,8 @@
 """从固定 GFLOPs 容量的主实验 `random_seed0` 基线配置派生 APP 分词前端迁移配置。
 
 三个新模型（APP+Transolver、APP+UPT、APP+GNOT）各自复用对应基线配置的训练协议：
-`train` 段（190/34 条目、统计量、100 epoch、`train_strides=[1]`、`lambda_hull=0.0`、
-种子）逐行照抄，因此数据划分与训练预算与主实验完全一致。模型段只保留基线的接收方
+`train` 段（190/34 条目、统计量、100 epoch、`train_strides=[1]`、`lambda_hull`、种子）
+逐行照抄，因此数据划分、训练预算与任务口径与主实验完全一致。模型段只保留基线的接收方
 主干结构与宽度（`d_model` / 层数 / slice 数 / latent 数 / 专家数等），再接上 APP 双域
 分词前端与坐标查询解码；分词参数（`flow_size_tiers` / `hull_size`）取
 `appsolver_oformer_random_seed0_isoflops.yaml`，与主实验的 APP 分词口径相同。

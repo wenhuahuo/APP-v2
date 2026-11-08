@@ -2,11 +2,14 @@
 
 两个模型各三组，只改变输入域、输出域和船面损失权重，其余超参逐项继承基础配置：
 
-- APPSolver-v2（`random_seed0` 划分）：基础配置 `appsolver_v2_flow_with_hull_random_seed0.yaml`；
+- APPSolver-v2（`random_seed0` 划分）：基础配置 `appsolver_v2_flow_with_hull_random_seed0.yaml`
+  （双域输入、仅流场输出、逐层 FiLM），派生 `flow_only` / `flow_with_hull` / `joint_flow_hull`
+  三组；
 - APP+OFormer（`random_seed0` 划分，固定 GFLOPs 容量）：基础配置
-  `appsolver_oformer_random_seed0_isoflops.yaml`，即 `flow_with_hull` 组本身（正式实验
-  直接复用它的三个训练种子 run），生成器不重写它，只派生 `flow_only` 与
-  `joint_flow_hull` 两组，每组训练种子 0/1/2。
+  `appsolver_oformer_random_seed0_isoflops.yaml` 即主实验默认口径，同时也就是
+  `joint_flow_hull` 组本身（正式实验直接复用它的三个训练种子 run），生成器不重写它，
+  只派生 `flow_only` 与 `flow_with_hull` 两组，每组训练种子 0/1/2。派生组沿用基础配置的
+  工况融合与容量，只改输入域、输出域与船面损失权重，因此三组的差别只有船体融合方式。
 
     python3 scripts/train/make_framework_ablation_configs.py
 """
@@ -22,9 +25,9 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "configs" / "appsolver_v2"
 OFORMER_DIR = ROOT / "configs" / "appsolver_oformer"
 BASE = CONFIG_DIR / "appsolver_v2_flow_with_hull_random_seed0.yaml"
-# APP+OFormer 的 `flow_with_hull` 组就是固定 GFLOPs 的全量 random_seed0 配置，直接复用。
+# APP+OFormer 的 `joint_flow_hull` 组就是固定 GFLOPs 的全量 random_seed0 主实验配置，直接复用。
 OFORMER_BASE = OFORMER_DIR / "appsolver_oformer_random_seed0_isoflops.yaml"
-OFORMER_DERIVED = ("flow_only", "joint_flow_hull")
+OFORMER_DERIVED = ("flow_only", "flow_with_hull")
 VARIANTS = {
     "flow_only": (("flow",), ("flow",)),
     "flow_with_hull": (("flow", "hull"), ("flow",)),
@@ -42,13 +45,21 @@ def replace_domains(text, key, domains):
 
 
 def derive(base_text, input_domains, output_domains):
-    """把基础配置文本改成指定输入/输出域的变体文本（仅动域列表与船面损失权重）。"""
+    """把基础配置文本改成指定输入/输出域的变体文本（仅动域列表与船面损失权重）。
+
+    船面损失权重跟随输出域：输出含船面时为 1.0（与主实验口径一致），只预测流场时为 0.0。
+    两个基础配置的起始权重不同（v2 的 `flow_with_hull` 为 0.0、APP+OFormer 的主配置为
+    1.0），因此按目标值写死而不是单向替换。
+    """
     base = "".join(line for line in base_text.splitlines(keepends=True)
                    if not line.startswith("#"))
     text = replace_domains(base, "input_domains", input_domains)
     text = replace_domains(text, "output_domains", output_domains)
-    if "hull" in output_domains:
-        text = text.replace("  lambda_hull: 0.0\n", "  lambda_hull: 1.0\n", 1)
+    wanted = 1.0 if "hull" in output_domains else 0.0
+    text, hits = re.subn(r"^  lambda_hull: [0-9.]+$", f"  lambda_hull: {wanted}", text,
+                         count=1, flags=re.M)
+    if hits != 1:
+        raise RuntimeError(f"lambda_hull 模板命中 {hits} 次")
     return text
 
 
@@ -62,10 +73,10 @@ def oformer_variants():
     base_text = OFORMER_BASE.read_text()
     base = yaml.safe_load(base_text)
     model = base["model"]
-    # flow_with_hull 组已作为基础配置存在，语义必须与它一致，否则派生结果不可比。
+    # joint_flow_hull 组已作为基础配置存在，语义必须与它一致，否则派生结果不可比。
     if (tuple(model["input_domains"]), tuple(model["output_domains"]),
-            base["train"]["lambda_hull"]) != (("flow", "hull"), ("flow",), 0.0):
-        raise RuntimeError(f"{OFORMER_BASE.name} 不是 flow_with_hull 口径")
+            base["train"]["lambda_hull"]) != (("flow", "hull"), ("flow", "hull"), 1.0):
+        raise RuntimeError(f"{OFORMER_BASE.name} 不是 joint_flow_hull 口径")
     derived = {}
     for name in OFORMER_DERIVED:
         input_domains, output_domains = VARIANTS[name]
@@ -81,13 +92,9 @@ def oformer_variants():
 
 
 def main():
-    base = "".join(line for line in BASE.read_text().splitlines(keepends=True)
-                   if not line.startswith("#"))
+    base = BASE.read_text()
     for name, (input_domains, output_domains) in VARIANTS.items():
-        text = replace_domains(base, "input_domains", input_domains)
-        text = replace_domains(text, "output_domains", output_domains)
-        if "hull" in output_domains:
-            text = text.replace("  lambda_hull: 0.0\n", "  lambda_hull: 1.0\n", 1)
+        text = derive(base, input_domains, output_domains)
         output = CONFIG_DIR / f"appsolver_v2_{name}_random_seed0.yaml"
         output.write_text(header(name) + text)
         print(output.name)

@@ -1,13 +1,13 @@
 """从随机划分主实验派生流场分词消融配置。
 
-两个模型各三种流场分词方法，只改流场分词参数，船体分词、主干与查询解码逐项继承基础
-配置（双域输入、仅流场输出、`lambda_hull=0.0`）：
+两个模型各三种流场分词方法，只改流场分词参数，船体分词、主干、查询解码与任务口径
+（输入/输出域、工况融合、`lambda_hull`）逐项继承基础配置：
 
 - APPSolver-v2（`random_seed0` 划分）：基础配置
   `appsolver_v2_flow_with_hull_random_seed0.yaml`，派生均匀、学习、自适应三份；
 - APP+OFormer（`random_seed0` 划分，固定 GFLOPs 容量）：基础配置
-  `appsolver_oformer_random_seed0_isoflops.yaml` 本身就是自适应分词组（已有训练结果，
-  生成器不重写它），只派生均匀与学习两组，各含训练种子 0/1/2。
+  `appsolver_oformer_random_seed0_isoflops.yaml` 本身就是自适应分词组（主实验默认口径，
+  已有训练结果，生成器不重写它），只派生均匀与学习两组，各含训练种子 0/1/2。
 
     python3 scripts/train/make_partition_ablation_configs.py
 """

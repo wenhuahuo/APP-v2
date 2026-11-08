@@ -4,7 +4,7 @@
 
 - 配置：均匀/学习分块各三份、五种工况融合各三份，均由生成器确定性派生；除目标字段
   与 `train.seed` 外与 `appsolver_oformer_random_seed0_isoflops.yaml` 逐项相同，自适应
-  分块与 `film` 组直接复用该配置；
+  分块与 `fourier_add` 组（主实验默认口径）直接复用该配置；
 - 分词：`uniform` / `learned` / `adaptive` 三种分词真的换掉流场 token（数量与预测都变），
   学习分块的分配参数参与反传，船体 token 与查询解码不变；
 - 工况融合：`film` 与重构前公式逐项一致；`none` 不引入任何调制参数、预测与工况取值
@@ -125,11 +125,12 @@ class ConditioningConfigTest(unittest.TestCase):
 
     def test_variants_only_change_the_conditioning(self):
         base = load(BASE)
-        self.assertEqual(base["model"]["conditioning"], "film")
+        # 主实验默认口径是 `fourier_add`，它就是工况融合消融的对照组
+        self.assertEqual(base["model"]["conditioning"], "fourier_add")
         self.assertEqual(set(conditioning_configs.OFORMER_METHODS),
-                         set(CONDITIONINGS) - {"film"})
+                         set(CONDITIONINGS) - {"fourier_add"})
         for method in CONDITIONINGS:
-            if method == "film":
+            if method == "fourier_add":
                 continue
             for train_seed in (0, 1, 2):
                 filename = derived_name(
@@ -139,7 +140,8 @@ class ConditioningConfigTest(unittest.TestCase):
                     config = load(filename)
                     self.assertEqual(config["model"]["conditioning"], method)
                     self.assertEqual(config["train"]["seed"], train_seed)
-                    self.assertEqual(dict(config["model"], conditioning="film"), base["model"])
+                    self.assertEqual(dict(config["model"], conditioning="fourier_add"),
+                                     base["model"])
                     self.assertEqual(dict(config["train"], seed=base["train"]["seed"]),
                                      base["train"])
 
@@ -279,9 +281,10 @@ class ConditioningForwardTest(unittest.TestCase):
         for method in CONDITIONINGS:
             with self.subTest(conditioning=method):
                 model = build(BASE, conditioning=method)
-                output = model(self.batch, self.queries)["flow"]
-                self.assertEqual(tuple(output.shape), (1, QUERIES, 5))
-                output.sum().backward()
+                output = model(self.batch, self.queries)
+                self.assertEqual(tuple(output["flow"].shape), (1, QUERIES, 5))
+                # 主配置是双域输出，两个域一起反传才能覆盖船面输出头
+                (output["flow"].sum() + output["hull"].sum()).backward()
                 bad = [name for name, parameter in model.named_parameters()
                        if parameter.grad is None or not torch.isfinite(parameter.grad).all()]
                 self.assertEqual(bad, [])
