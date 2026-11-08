@@ -1,25 +1,27 @@
-"""汇总 APP+OFormer 两项全量消融（固定 GFLOPs 容量、random_seed0 划分、三种训练种子）。
+"""汇总 APP+OFormer 三项全量消融：船体融合、流场分词、工况融合。
 
-口径与主实验一致：
+三项消融都跑在 `random_seed0` 全量划分（train 190 / val 34）、固定前向计算量容量上，
+每种变体三个训练种子（100 epoch × 190 步 = 19 000 步、`train_strides=[1]`），指标取
+`best.pt` 的 stride 1 全密度查询，按 `src/eval/aggregate.py` 的逐条目点数加权池化汇总，
+三种子取 `ddof=1` 的均值与样本标准差。
 
-- 指标来自各 run 的 `output/<配置名>/metrics_{best,last}.json` 的 `strides.val.stride1`
-  （34 条 `random_seed0` 留出集、全密度查询），用 `src/eval/aggregate.py` 的同一条池化
-  公式算整体流场 RMSE、整体 R² 与 η 通道池化 RMSE（mm）；三种子取均值与样本标准差
-  （`ddof=1`）；
-- 参数量、stride 1 主干 token 数、训练 token 总量与前向 GFLOPs 由
-  `scripts/eval/profile_model_flops.py --json` 统计后以 `--flops` 传入，本脚本只做汇总；
-- 两项消融各有一个 `--kind`：`partition` 对照均匀 / 学习 / 自适应流场分词，
-  `conditioning` 对照六种工况融合方式；`adaptive` 与 `film` 组直接复用
-  `appsolver_oformer_random_seed0[_train_seed1/2]_isoflops` 的既有结果。
-
+    # 船体融合：flow_only / flow_with_hull / joint_flow_hull
+    python3 scripts/eval/summarize_app_oformer_ablations.py --kind hull_fusion \
+        --json output/app_oformer_hull_fusion_summary.json
+    # 流场分词：adaptive / uniform / learned
     python3 scripts/eval/summarize_app_oformer_ablations.py --kind partition \
-        --flops output/app_oformer_partition_ablation_flops.json \
         --json output/app_oformer_partition_ablation_summary.json
+    # 工况融合：film / none / adaln_zero / fourier_add / cond_token / cond_xattn
+    python3 scripts/eval/summarize_app_oformer_ablations.py --kind conditioning \
+        --json output/app_oformer_conditioning_ablation_summary.json
+
+对照组（`flow_with_hull` / `adaptive` / `film`）都是
+`appsolver_oformer_random_seed0[_train_seed1/2]_isoflops`，与主实验的 APP+OFormer 是同一批
+run，不重复训练。
 """
 
 import argparse
 import json
-import statistics
 import sys
 from pathlib import Path
 
@@ -27,34 +29,43 @@ ROOT = Path(__file__).resolve().parents[2]
 for name in ("eval",):
     sys.path.insert(0, str(ROOT / "src" / name))
 
-from aggregate import eta_rmse_mm, overall  # noqa: E402
+import summary as runs  # noqa: E402
 
 SPLIT = "random_seed0"
 TRAIN_SEEDS = (0, 1, 2)
-STRIDE = "1"
-CHECKPOINTS = ("best", "last")
-# 主表用 best.pt；last.pt 只做稳定性核对
-PRIMARY = "best"
-BASE = f"appsolver_oformer_{SPLIT}_isoflops"
-# (变体名, 配置名前缀)；前缀 + `_random_seed0[_train_seed<S>]_isoflops.yaml`
+# (kind, 报告名, 配置名前缀, 是否对照)；对照组的 run 名与主实验 APP+OFormer 相同
 VARIANTS = {
+    "hull_fusion": (
+        ("flow_only", "appsolver_oformer_flow_only", False,
+         "只输入自由液面点云，输出流场"),
+        ("flow_with_hull", "appsolver_oformer", True,
+         "输入自由液面 + 船体湿表面，只输出流场（默认口径）"),
+        ("joint_flow_hull", "appsolver_oformer_joint_flow_hull", False,
+         "输入双域，同时输出流场与船面 Cp，lambda_hull = 1.0"),
+    ),
     "partition": (
-        ("uniform", "appsolver_oformer_uniform_partition"),
-        ("learned", "appsolver_oformer_learned_partition"),
-        ("adaptive", "appsolver_oformer"),
+        ("adaptive", "appsolver_oformer", True,
+         "按到船体水线距离分档的自适应 Patch 分词"),
+        ("uniform", "appsolver_oformer_uniform_partition", False,
+         "物理边长统一的均匀 Patch 分词"),
+        ("learned", "appsolver_oformer_learned_partition", False,
+         "学习得到的 512 个潜 token"),
     ),
     "conditioning": (
-        ("film", "appsolver_oformer"),
-        ("none", "appsolver_oformer_conditioning_none"),
-        ("adaln_zero", "appsolver_oformer_conditioning_adaln_zero"),
-        ("fourier_add", "appsolver_oformer_conditioning_fourier_add"),
-        ("cond_token", "appsolver_oformer_conditioning_cond_token"),
-        ("cond_xattn", "appsolver_oformer_conditioning_cond_xattn"),
+        ("film", "appsolver_oformer", True, "逐层 FiLM（默认口径）"),
+        ("none", "appsolver_oformer_conditioning_none", False, "不输入工况"),
+        ("adaln_zero", "appsolver_oformer_conditioning_adaln_zero", False, "adaLN-Zero 调制"),
+        ("fourier_add", "appsolver_oformer_conditioning_fourier_add", False,
+         "Fourier 加性编码"),
+        ("cond_token", "appsolver_oformer_conditioning_cond_token", False, "条件 token 拼接"),
+        ("cond_xattn", "appsolver_oformer_conditioning_cond_xattn", False,
+         "条件交叉注意力"),
     ),
 }
-LABELS = {
-    "partition": "流场分词",
-    "conditioning": "工况融合",
+TITLES = {
+    "hull_fusion": "船体融合机制消融",
+    "partition": "流场分词消融",
+    "conditioning": "工况融合消融",
 }
 
 
@@ -63,94 +74,75 @@ def run_name(prefix, train_seed):
     return f"{prefix}_{SPLIT}{suffix}_isoflops"
 
 
-def metrics_path(run, checkpoint):
-    return ROOT / "output" / run / f"metrics_{checkpoint}.json"
-
-
-def seed_metrics(run, checkpoint):
-    """单个 run 的整体流场 RMSE、整体 R² 与 η RMSE（mm）。"""
-    metrics = json.loads(metrics_path(run, checkpoint).read_text())
-    records = metrics["strides"]["val"][STRIDE]
-    summary = overall(records)
-    return {"checkpoint": f"{checkpoint}.pt", "checkpoint_epoch": metrics["checkpoint_epoch"],
-            "parameters": metrics["parameters"], "n_points": summary["n_points"],
-            "overall_rmse": summary["overall_rmse"], "overall_r2": summary["overall_r2"],
-            "eta_rmse_mm": eta_rmse_mm(records)}
-
-
-def mean_std(values):
-    """三种子的均值与样本标准差（`ddof=1`）。"""
-    return {"mean": statistics.fmean(values),
-            "std": statistics.stdev(values) if len(values) > 1 else 0.0}
-
-
-def flops_row(rows, run):
-    for row in rows:
-        if row["config"] == run:
-            return row
-    raise KeyError(f"缺少 {run} 的计算量统计")
-
-
-def variant_row(prefix, rows):
-    """一个变体的三种子指标与计算成本；成本取 seed 0 配置的结构统计。"""
-    profile = flops_row(rows, run_name(prefix, 0))
-    seeds = {seed: seed_metrics(run_name(prefix, seed), PRIMARY) for seed in TRAIN_SEEDS}
-    row = {
-        "config_prefix": prefix,
-        "configs": [f"configs/appsolver_oformer/{run_name(prefix, seed)}.yaml"
-                    for seed in TRAIN_SEEDS],
-        "parameters": profile["parameters"],
-        "tokens_stride1": profile["tokens"],
-        "token_kind": profile["token_kind"],
-        "training_tokens": profile["training_tokens"],
-        "gflops": profile["gflops"],
-        "train_seeds": list(TRAIN_SEEDS),
-        "overall_rmse": mean_std([seeds[seed]["overall_rmse"] for seed in TRAIN_SEEDS]),
-        "overall_r2": mean_std([seeds[seed]["overall_r2"] for seed in TRAIN_SEEDS]),
-        "eta_rmse_mm": mean_std([seeds[seed]["eta_rmse_mm"] for seed in TRAIN_SEEDS]),
-        "seeds": [dict(run=run_name(prefix, seed), **seeds[seed]) for seed in TRAIN_SEEDS],
-    }
-    last = [seed_metrics(run_name(prefix, seed), "last") for seed in TRAIN_SEEDS]
-    row["last"] = {"overall_rmse": mean_std([item["overall_rmse"] for item in last]),
-                   "eta_rmse_mm": mean_std([item["eta_rmse_mm"] for item in last])}
-    return row
+def variant_rows(root, kind, table, n_train):
+    definitions = VARIANTS[kind]
+    reference = next(name for name, _, is_reference, _ in definitions if is_reference)
+    rows = runs.model_rows(
+        root,
+        [name for name, _, _, _ in definitions],
+        lambda label: [run_name(prefix, seed)
+                       for name, prefix, _, _ in definitions if name == label
+                       for seed in TRAIN_SEEDS],
+        table, n_train, reference_label=reference)
+    for row, (_, prefix, _, description) in zip(rows, definitions):
+        row["variant"] = row["label"]
+        row["config_prefix"] = prefix
+        row["description"] = description
+        row["is_reference"] = row["label"] == reference
+    return rows, reference
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", required=True, choices=sorted(VARIANTS))
-    parser.add_argument("--flops", required=True,
-                        help="profile_model_flops.py --json 写出的计算量统计")
     parser.add_argument("--json", required=True, help="把汇总写进这个 json")
+    parser.add_argument("--root", default=str(ROOT), help="仓库根目录")
     args = parser.parse_args()
 
-    rows = json.loads(Path(args.flops).read_text())
-    variants = [variant_row(prefix, rows) for _, prefix in VARIANTS[args.kind]]
+    root = Path(args.root)
+    table = runs.load_complexity(root)
+    split = json.loads((root / "configs" / "splits_multihull.json").read_text())[SPLIT]
+    n_train = split["counts"]["train"]
+    rows, reference = variant_rows(root, args.kind, table, n_train)
     summary = {
         "ablation": args.kind,
-        "source": f"output/<配置名>/metrics_{PRIMARY}.json 的 strides.val.stride{STRIDE}"
-                  f"（34 条 {SPLIT} 留出集）",
-        "aggregation": "src/eval/aggregate.py：逐条目点数加权池化 → 五通道 NRMSE → "
-                       "整体 RMSE / 整体 R²",
-        "statistics": "ddof=1 的样本均值与样本标准差，n=3 个训练种子",
-        "cost_source": args.flops,
-        "checkpoint_rule": "best.pt 为主表，last.pt 用于稳定性核对",
-        "reused_run": BASE,
-        "variants": variants,
+        "title": TITLES[args.kind],
+        "split": SPLIT,
+        "protocol": split["protocol"],
+        "holdout": split["holdout"],
+        "train_entries": n_train,
+        "val_entries": split["counts"]["val"],
+        "n_points": rows[0]["n_points"],
+        "train_seeds": list(TRAIN_SEEDS),
+        "epochs": runs.TRAIN_STEPS_PER_ENTRY,
+        "train_steps": n_train * runs.TRAIN_STEPS_PER_ENTRY,
+        "reference_variant": reference,
+        "run_count": len(VARIANTS[args.kind]) * len(TRAIN_SEEDS),
+        "variants": rows,
+        **runs.baseline_metadata(root),
     }
-    path = ROOT / args.json
+    path = root / args.json
     path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n")
 
-    header = (f"{'变体':14s}{'参数(M)':>9s}{'GFLOPs':>9s}{'token':>7s}{'训练token(M)':>13s}"
-              f"{'整体RMSE%':>16s}{'整体R²':>16s}{'ηRMSE(mm)':>16s}")
-    print(f"APP+OFormer {LABELS[args.kind]}消融（{SPLIT} val，stride 1，n=3 种子）")
-    print(header)
-    for (name, _), row in zip(VARIANTS[args.kind], variants):
-        print(f"{name:14s}{row['parameters'] / 1e6:9.3f}{row['gflops']:9.2f}"
-              f"{row['tokens_stride1']:7d}{row['training_tokens'] / 1e6:13.1f}"
+    print(f"APP+OFormer {TITLES[args.kind]}（{SPLIT} val，stride 1，n=3 种子，"
+          f"{rows[0]['n_points']} 点）")
+    print(f"{'变体':16s}{'参数(M)':>9s}{'GFLOPs':>8s}{'token':>7s}"
+          f"{'ηRMSE(mm)':>19s}{'整体RMSE%':>19s}{'整体R²':>21s}{'ΔR²':>10s}")
+    for row in rows:
+        change = row.get("contrast", {}).get("overall_r2_change")
+        print(f"{row['variant']:16s}{row['parameters'] / 1e6:9.3f}"
+              f"{('未标定' if row['gflops'] is None else format(row['gflops'], '.2f')):>9s}"
+              f"{row['tokens_stride1']:7d}"
+              f"{row['eta_rmse_mm']['mean']:10.3f}±{row['eta_rmse_mm']['std']:.3f}"
               f"{row['overall_rmse']['mean']:10.2f}±{row['overall_rmse']['std']:.2f}"
-              f"{row['overall_r2']['mean']:10.4f}±{row['overall_r2']['std']:.4f}"
-              f"{row['eta_rmse_mm']['mean']:10.3f}±{row['eta_rmse_mm']['std']:.3f}")
+              f"{row['overall_r2']['mean']:+11.4f}±{row['overall_r2']['std']:.4f}"
+              f"{('—' if change is None else format(change, '+.4f')):>10s}")
+        if "hull" in row:
+            print(f"{'':16s}船面 Cp：RMSE {row['hull']['cp_rmse']['mean']:.4f}"
+                  f"±{row['hull']['cp_rmse']['std']:.4f}，"
+                  f"R² {row['hull']['cp_r2']['mean']:+.4f}"
+                  f"±{row['hull']['cp_r2']['std']:.4f}"
+                  f"（{row['hull']['n_points']} 个船面点）")
     print(f"\n写入 {path}")
 
 
