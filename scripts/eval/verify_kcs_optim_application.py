@@ -1,8 +1,8 @@
-"""KCS 艏部 FFD 变体的下游验证：APP+OFormer 的船面 Cp 积分 vs 新全量 CFD。
+"""KCS 艏部 FFD 变体的下游验证：主实验口径 APP+OFormer 的船面 Cp 积分 vs 新全量 CFD。
 
 用主实验口径训练的 `appsolver_oformer_random_seed0_isoflops`（双域输入/输出、逐层 Fourier add、
-`lambda_hull=1.0`，含船面输出头）
-在基准 KCS 与两个 FFD 变体上预测船面 Cp，沿半船湿表面做轴向压力积分，得到全船压差阻力，
+`lambda_hull=1.0`，含船面输出头）在基准 KCS 与两个 FFD 变体上预测船面 Cp，
+沿半船湿表面做轴向压力积分，得到全船压差阻力，
 与三个算例 `force.dat` 的 20–25 s 窗口压力项对照。几何对应、FFD 点变形、法向/求积权重更新、
 变体水线 SDF 与积分口径全部复用 `probe_kcs_ffd_pressure.py`，本脚本只做本轮的 CFD 读数、
 相对/绝对误差与最小积分核验。
