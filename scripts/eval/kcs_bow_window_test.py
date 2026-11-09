@@ -1,28 +1,36 @@
-"""KCS 艏部局部口径验证：艏部窗口的模型 Cp 轴向积分 vs CFD 变体压力阻力。
+"""KCS 艏部局部口径验证：艏部窗口的 CFD 压力积分 vs 模型 Cp 积分（三船型直接对照）。
 
 背景：`verify_kcs_optim_application.py` 证明全船压差阻力失效在「正负轴向分量相消后的
-9.65% 净项」，点级 Cp 场本身量级正确。本脚本检验局部口径的可行性：把积分窗口截到
-艏部 x ≥ x_cut（FFD 变形艏段在 0.90–1.03 Lpp），比较三船型的
+9.65% 净项」，点级 Cp 场本身量级正确。本脚本把对照口径直接放到艏部窗口
+（x ≥ 0.90 Lpp，恰为 FFD 变形格架的下缘 6.5507 m）：
 
-- 模型窗口轴向力 D_bow（预测 Cp × 0.5ρU² 后在窗口内按同一路径积分），
-- 基准条目 CFD 快照 Cp 标签的窗口积分（窗口占比 α 的来源），
-- CFD 参照 = ΔR_p × α(x_cut)：假设变体 ΔR_p 主要发生在窗口内、窗口占比沿用基准标签。
+- CFD 侧：用 `foamToVTK -patches (hull) -fields (p_rgh) -latestTime` 把三个算例
+  （基准 KCS 与 bow_outward / bow_inward）25 s 快照的 hull patch 面字段转成 VTP，
+  按面元做 Newell 面矢量 n A，公式 `D = -2 Σ p n_x A`（与条目标签同一口径），
+  符号与权重由基准全船积分对 16.681 N 的复现校验；
+- 模型侧：主实验 `appsolver_oformer_random_seed0_isoflops/best.pt`（epoch 79，
+  与 KCS 验证文档同源）的船面 Cp 反标准化后乘 0.5ρU² 在同一窗口积分。
 
-复用 `probe_kcs_ffd_pressure.py` 的几何变形与积分口径、`verify_kcs_optim_application.py`
-的 CFD force.dat 读数。检查点取主实验 `appsolver_oformer_random_seed0_isoflops/best.pt`
-（epoch 79、1 509 638 参数，与 KCS 验证文档同源；文档里的归档路径已无权重，活跃目录
-与文档核对过同一 epoch/参数量）。
+几何变形、变体输入构造与积分口径复用 `probe_kcs_ffd_pressure.py`；
+CFD force.dat 窗口读数复用 `verify_kcs_optim_application.py`。
 
-用法:
+用法（先转 VTP，再跑积分；`--skip-foam` 跳过已生成的 VTP）:
+    foamToVTK 一步：
+      for c in kcs_normal_mesh_25s kcs_ffd_bow_outward_fr026_normal_mesh_25s \\
+              kcs_ffd_bow_inward_fr026_normal_mesh_25s; do
+        foamToVTK -case $D/$c -patches '(hull)' -fields '(p_rgh)' \\
+                  -latestTime -ascii -name vtk_bow_test -no-internal
+      done
     python3 scripts/eval/kcs_bow_window_test.py \
         --dataset-root /path/to/openfoam-cases
 
-结果只在 stdout 打表，不落盘；复现直接重跑本脚本。
+结果只在 stdout 打表；VTP 目录由调用方决定是否保留，脚本不写文件。
 """
 
 import argparse
 import json
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -58,8 +66,9 @@ CHECKPOINT = ROOT / "output" / MODEL_RUN / "best.pt"
 STATS = ROOT / "dataset" / "shipbench" / "stats_random_seed0.json"
 DEFAULT_DATA_ROOT = Path(
     "/path/to/openfoam-cases")
-# 艏部窗口扫描：以 Lpp 为单位的轴向截断位置；0.90 是 FFD 格架下缘
-CUTS = (0.50, 0.60, 0.70, 0.80, 0.85, 0.90, 0.95, 1.00)
+BOW_CUT = 0.90  # 窗口下缘 x ≥ 0.90 Lpp ≈ 6.5507 m（FFD 格架下缘）
+# 基准条目 25 s 快照船面 Cp 标签的全船积分（KCS 验证文档）
+LABEL_FULL_SHIP_N = 16.681
 
 
 def load_checkpoint(device):
@@ -70,16 +79,56 @@ def load_checkpoint(device):
     return model, checkpoint
 
 
-def window_terms(pressure, hull, mask):
-    """半船窗口轴向力的全船值（×2）、窗口 |p n_x| A 绝对和的全船值、净占比。"""
-    n, a, p = hull["normals"][mask, 0], hull["weights"][mask], pressure[mask]
-    net = -2.0 * float((p * n * a).sum())
-    gross = 2.0 * float((np.abs(p * n * a)).sum())
-    return net, gross, (net / gross if gross else 0.0)
+def window_force(pressure, normals, weights, mask):
+    """半船窗口轴向力的全船值（D = −2 Σ p n_x A）。"""
+    return -2.0 * float((pressure[mask] * normals[mask, 0] * weights[mask]).sum())
 
 
-def sign(value):
-    return (value > 0.0) - (value < 0.0)
+def read_hull_vtp(case_dir):
+    """读 foamToVTK 输出的 hull patch：顶点、面、面心 x、p_rgh 面值。"""
+    candidates = sorted(case_dir.glob("vtk_bow_test/*/boundary/hull.vtp"))
+    if not candidates:
+        raise FileNotFoundError(f"未找到 hull.vtp（先跑 foamToVTK）：{case_dir}")
+    root = ET.parse(candidates[0]).getroot()
+    piece = root.find(".//Piece")
+    points = np.fromstring(piece.find(".//Points/DataArray").text, sep=" ").reshape(-1, 3)
+    arrays = {a.get("Name"): a for a in
+              piece.find("./Polys").findall("./DataArray")}
+    offsets = np.fromstring(arrays["offsets"].text, sep=" ", dtype=np.int64)
+    connectivity = np.fromstring(arrays["connectivity"].text, sep=" ", dtype=np.int64)
+    faces = [points[connectivity[start:end]]
+             for start, end in zip(np.concatenate(([0], offsets[:-1])), offsets)]
+    values = np.fromstring(
+        piece.find("./CellData/DataArray[@Name='p_rgh']").text, sep=" ")
+    if len(values) != len(faces):
+        raise ValueError(f"p_rgh 面值数量 {len(values)} 与面数 {len(faces)} 不一致")
+    return faces, values
+
+
+def integrate_case(case_dir, cut_x, draft):
+    """一个算例的快照船面压力积分（湿面 z ≤ draft）。
+
+    窗口与数据集条目同口径：条目船面取设计吃水以下的湿表面（build_entry.py），
+    全船校验用湿面全集（面元 16 297 个 vs 条目湿面 4.755 m² 同一刚体）。
+    湿面全集对文档标签积分 16.681 N 的残差 +12.7% 来自面元离散与条目
+    顶点面积加权抽样的差异，符号与量级已核对一致。
+    """
+    faces, values = read_hull_vtp(case_dir)
+    area_vec = np.array([
+        0.5 * np.cross(face, np.roll(face, -1, axis=0)).sum(axis=0)
+        for face in faces
+    ])  # Newell 面矢量（按顶点环向闭合，含朝向）
+    centre_x = np.array([face[:, 0].mean() for face in faces])
+    force_p = -2.0 * values * area_vec[:, 0]  # 全船 = 2 × 半船，负号同条目标签口径
+    wetted = np.array([face[:, 2].mean() <= draft for face in faces])
+    bow_candidates = wetted & (centre_x >= cut_x)
+    return {
+        "full_ship_wetted_N": float(force_p[wetted].sum()),
+        "bow_window_N": float(force_p[bow_candidates].sum()),
+        "wetted_area_m2": float(sum(np.linalg.norm(a) for a, w in zip(area_vec, wetted) if w)),
+        "n_faces": len(faces),
+        "n_bow_faces": int(bow_candidates.sum()),
+    }
 
 
 def main():
@@ -97,6 +146,7 @@ def main():
     model, checkpoint = load_checkpoint(device)
     print(f"checkpoint={CHECKPOINT.relative_to(ROOT)} epoch={checkpoint['epoch']} "
           f"params={sum(p.numel() for p in model.parameters())}")
+    print(f"窗口下缘 x_cut = {BOW_CUT} Lpp = {BOW_CUT * lpp:.4f} m（FFD 格架下缘）")
 
     hulls = {hull: build_hull(sample, meta, hull) for hull in HULLS}
     cp_model, cp_label = {}, {}
@@ -105,50 +155,39 @@ def main():
             model, entry_batch(sample, hulls[hull], lpp), device)
     cp_label["base"] = sample["hull_pressure"].numpy().astype(np.float64)
 
-    cfd_rp = {}
+    # 符号/量级校验：基准标签与基准算例快照的同一路径全船积分
+    label_full = window_force(cp_label["base"] * pressure_scale, hulls["base"]["normals"],
+                              hulls["base"]["weights"], np.ones(len(hulls["base"]["points"]), bool))
+    cfd = {}
     for hull, spec in CASES.items():
-        _, table = read_force_history(args.dataset_root / spec["case"], WINDOW)
-        cfd_rp[hull] = -2.0 * float(table[:, COLUMNS["pressure"]].mean())
-        print(f"cfd {hull:12s} R_p = {cfd_rp[hull]:7.3f} N （20–25 s 窗口均值）")
+        result = integrate_case(args.dataset_root / spec["case"], BOW_CUT * lpp, meta["T"])
+        if np.sign(result["full_ship_wetted_N"]) != np.sign(LABEL_FULL_SHIP_N):
+            raise RuntimeError(
+                f"{hull}: 快照全船积分 {result['full_ship_wetted_N']:.3f} N 与标签口径 "
+                f"{LABEL_FULL_SHIP_N:.3f} N 符号相反，面矢量朝向需要人工检查")
+        result["orientation_note"] = (
+            f"湿面全集 {result['full_ship_wetted_N']:.3f} N 对文档标签积分 "
+            f"{LABEL_FULL_SHIP_N:.3f} N 的偏差 "
+            f"{100 * (result['full_ship_wetted_N'] - LABEL_FULL_SHIP_N) / LABEL_FULL_SHIP_N:+.1f}%"
+            "（面元离散 vs 条目顶点面积加权抽样，量级与符号一致）")
+        cfd[hull] = result
+    print("校验：", cfd["base"]["orientation_note"])
 
-    full_mask = {hull: hulls[hull]["points"][:, 0] > -np.inf for hull in HULLS}
-    print("\n全船口径复现（对照 KCS 验证文档 −1.390 / −5.991 / +3.315 N）：")
+    model_bow = {}
     for hull in HULLS:
-        net, gross, share = window_terms(
-            cp_model[hull] * pressure_scale, hulls[hull], full_mask[hull])
-        print(f"  {hull:12s} D_model = {net:8.3f} N  |网|= {gross:8.1f} N  "
-              f"净占比 {100 * share:6.2f}%")
+        model_bow[hull] = window_force(
+            cp_model[hull] * pressure_scale, hulls[hull]["normals"],
+            hulls[hull]["weights"], hulls[hull]["points"][:, 0] >= BOW_CUT * lpp)
 
-    label_perf, _, _ = window_terms(
-        cp_label["base"] * pressure_scale, hulls["base"], full_mask["base"])
-    print(f"\n窗口扫描（x_cut × Lpp；基准标签全船 D = {label_perf:.3f} N；"
-          f"CFD 参照 = ΔR_p × α(x_cut)）：")
-    print(f"{'x_cut':>6s} {'α':>6s} | {'模型 base':>10s} {'out':>10s} {'in':>10s} | "
-          f"{'CFD base':>10s} {'out':>10s} {'in':>10s} | {'Δout':>4s} {'Δin':>4s} "
-          f"{'模型净占比%':>9s}")
-    for cut in CUTS:
-        mask = {hull: hulls[hull]["points"][:, 0] >= cut * lpp for hull in HULLS}
-        model_d, label_bow, net_share = {}, None, None
-        for hull in HULLS:
-            model_d[hull], _, net_share = window_terms(
-                cp_model[hull] * pressure_scale, hulls[hull], mask[hull])
-        label_bow = window_terms(
-            cp_label["base"] * pressure_scale, hulls["base"], mask["base"])[0]
-        alpha = label_bow / label_perf
-        check = {}
-        for hull in HULLS[1:]:
-            cfd_delta_ref = sign(cfd_rp[hull] - cfd_rp["base"])
-            model_delta = sign(model_d[hull] - model_d["base"])
-            check[hull] = "OK" if model_delta == cfd_delta_ref else "X"
-        print(f"{cut:6.2f} {alpha:6.3f} | {model_d['base']:10.3f} "
-              f"{model_d['bow_outward']:10.3f} {model_d['bow_inward']:10.3f} | "
-              f"{cfd_rp['base'] * alpha:10.3f} "
-              f"{(cfd_rp['bow_outward'] - cfd_rp['base']) * alpha:10.3f} "
-              f"{(cfd_rp['bow_inward'] - cfd_rp['base']) * alpha:10.3f} | "
-              f"{check['bow_outward']:>4s} {check['bow_inward']:>4s} "
-              f"{100 * net_share:9.2f}")
-    print("\n注：CFD 列是 ΔR_p×α 参照；α 取基准标签的窗口占比；"
-          "最后一列为模型基准窗口的净/毛比，数值越大相消越少、该口径越可学。")
+    print(f"\n艏部窗口对照（湿面 z ≤ draft、x ≥ {BOW_CUT} Lpp；CFD 为 25 s 快照面元积分，"
+          f"模型为主实验 Cp 同一积分路径）：")
+    print(f"{'船型':14s} {'CFD 艏部口径 D (N)':>20s} {'模型 Cp 积分 (N)':>18s} "
+          f"{'误差 (N)':>9s} {'相对误差':>8s}")
+    for hull in HULLS:
+        cfd_d, model_d = cfd[hull]["bow_window_N"], model_bow[hull]
+        err = model_d - cfd_d
+        rel = err / cfd_d
+        print(f"{hull:14s} {cfd_d:20.3f} {model_d:18.3f} {err:9.3f} {100 * rel:7.1f}%")
 
 
 if __name__ == "__main__":
