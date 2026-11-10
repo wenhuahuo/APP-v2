@@ -2,15 +2,18 @@
 
 判别点：
 
-- 7 个模型 × 训练种子 0/1/2 共 21 份配置由 `make_multires_configs.py` 从主实验
+- 5 个模型（与留一船型泛化实验同批，按 `GENERALIZATION_MODELS` 顺序）× 训练种子 \
+  0/1/2 共 15 份配置由 `make_multires_configs.py` 从主实验
   `random_seed0_isoflops` 配置确定性派生，只有两处不同：`train_strides: [1, 2]`
   （每条条目在 1/2 中随机取一档）与 `eval.strides: [1, 2, 4, 8]`；
 - 数据划分、统计量、容量、优化超参与训练轮数逐项沿用基准配置；训练种子变体只改
   `train.seed` 与头注释；
-- 数组作业 21 个元素（先种子、后模型）、`%2`，元素与配置一一对应；拥有 `encode` /
-  `decode` 接口的 4 个模型额外做固定输入编码（`encode_stride = 1`）评测。
+- 数组作业 15 个元素（先模型、后种子，与留一船型同序）、`%2`，元素与配置一一对应；
+  拥有 `encode` / `decode` 接口的 3 个模型额外做固定输入编码（`encode_stride = 1`）
+  评测。
 """
 
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -23,10 +26,10 @@ sys.path.insert(0, str(ROOT / "scripts" / "train"))
 import make_multires_configs as configs  # noqa: E402
 import make_split_configs  # noqa: E402
 
-MODELS = make_split_configs.MODELS
+MODELS = make_split_configs.GENERALIZATION_MODELS
 TRAIN_SEEDS = (0, 1, 2)
 SBATCH = ROOT / "scripts" / "train" / "train_multires_experiment.sbatch"
-ENCODE_MODELS = ("appsolver_v2", "appsolver_oformer", "oformer", "upt")
+ENCODE_MODELS = ("appsolver_v2", "appsolver_oformer", "oformer")
 
 
 def load(path):
@@ -79,9 +82,9 @@ class MultiresConfigTest(unittest.TestCase):
 
 
 class MultiresSbatchTest(unittest.TestCase):
-    def test_array_covers_seven_models_and_three_seeds(self):
+    def test_array_covers_generalization_models_and_three_seeds(self):
         text = SBATCH.read_text()
-        self.assertIn("--array=0-20%2", text)
+        self.assertIn("--array=0-14%2", text)
         self.assertIn("--gres=gpu:a6000:1", text)
         self.assertIn("--partition=gpu", text)
         self.assertIn("--chdir=/path/to/cluster-home/Documents/APPSolver-v2", text)
@@ -89,6 +92,14 @@ class MultiresSbatchTest(unittest.TestCase):
         self.assertIn("--job-name=multires-isoflops-multiseed", text)
         models_block = text.split("MODELS=(", 1)[1].split(")", 1)[0]
         self.assertEqual(tuple(models_block.split()), MODELS)
+        # 模型集合与顺序与留一船型泛化数组作业完全一致
+        leave_hull = (ROOT / "scripts" / "train" / "train_generalization_leave_hull.sbatch")
+        leave_models = []
+        for line in leave_hull.read_text().splitlines():
+            match = re.match(r"\s*configs/([a-z_0-9]+)/\1_loto_kvlcc2_isoflops.yaml", line)
+            if match and match.group(1) not in leave_models:
+                leave_models.append(match.group(1))
+        self.assertEqual(tuple(models_block.split()), tuple(leave_models))
         seeds_block = text.split("TRAIN_SEEDS=(", 1)[1].split(")", 1)[0]
         self.assertEqual(tuple(int(seed) for seed in seeds_block.split()), TRAIN_SEEDS)
         encode_block = text.split("ENCODE_MODELS=(", 1)[1].split(")", 1)[0]

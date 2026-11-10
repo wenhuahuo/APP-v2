@@ -1,7 +1,7 @@
 """从固定 GFLOPs 容量的主实验 `random_seed0` 配置派生多分辨率训练验证实验配置。
 
-7 个模型（主表同一批，GINO 与 CORAL 已从实验计划中移除）× 训练种子 0/1/2 共 21 份
-配置。与基准配置的差别只有两处：
+5 个模型（与留一船型泛化实验同批，按 `GENERALIZATION_MODELS` 顺序）× 训练种子 0/1/2
+共 15 份配置。与基准配置的差别只有两处：
 
 - `train.train_strides` 由 `[1]` 改为 `[1, 2]`：每个 epoch 遍历全部训练条目，
   每条条目在 1/2 两档里随机取一档查询密度（`src/train/trainer.py`）；
@@ -22,7 +22,8 @@ import make_split_configs
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "configs"
 SPLIT = "random_seed0"
-MODELS = make_split_configs.MODELS
+# 与留一船型泛化实验同一批模型（按 `GENERALIZATION_MODELS` 顺序）
+MODELS = make_split_configs.GENERALIZATION_MODELS
 TRAIN_SEEDS = (1, 2)
 EVAL_STRIDES = (1, 2, 4, 8)
 BASE_EVAL = "eval:\n  strides:\n  - 1\n"
