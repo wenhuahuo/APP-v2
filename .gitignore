@@ -19,3 +19,25 @@ __pycache__/
 # 编辑器与系统
 .vscode/
 .DS_Store
+
+# LaTeX 构建中间产物（仅作用于 docs/ 下的论文与模板目录）
+docs/**/*.aux
+docs/**/*.bbl
+docs/**/*.blg
+docs/**/*.brf
+docs/**/*.fdb_latexmk
+docs/**/*.fls
+docs/**/*.log
+docs/**/*.out
+docs/**/*.toc
+docs/**/*.lof
+docs/**/*.lot
+docs/**/*.nav
+docs/**/*.snm
+docs/**/*.vrb
+docs/**/*.bcf
+docs/**/*.run.xml
+docs/**/*.spl
+docs/**/*.synctex.gz
+docs/**/*.synctex(busy)
+docs/**/*.xdv
