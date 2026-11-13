@@ -9,7 +9,9 @@ logs/
 *.npz
 vis/**/*.png
 vis/**/*.pdf
-/vis/kcs_bow_pressure/run_manifest_3d.json
+# 本地运行记录与 draw.io 自动备份
+vis/**/run_manifest*.json
+vis/**/.$*.drawio.bkp
 
 # Python
 __pycache__/
