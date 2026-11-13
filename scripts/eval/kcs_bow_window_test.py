@@ -84,8 +84,13 @@ def window_force(pressure, normals, weights, mask):
     return -2.0 * float((pressure[mask] * normals[mask, 0] * weights[mask]).sum())
 
 
-def read_hull_vtp(case_dir):
-    """读 foamToVTK 输出的 hull patch：顶点、面、面心 x、p_rgh 面值。"""
+def read_hull_vtp(case_dir, with_connectivity=False):
+    """读 foamToVTK 输出的 hull patch：顶点、面、面心 x、p_rgh 面值。
+
+    `with_connectivity=True` 时返回 `(points, polygons, values)`，`polygons` 是每个面
+    的**顶点索引**（不是坐标），供三维渲染直接用同一套三角化拓扑（顶点数组只读一次，
+    面片共享顶点）。默认行为不变（返回面坐标列表），积分口径不受影响。
+    """
     candidates = sorted(case_dir.glob("vtk_bow_test/*/boundary/hull.vtp"))
     if not candidates:
         raise FileNotFoundError(f"未找到 hull.vtp（先跑 foamToVTK）：{case_dir}")
@@ -96,12 +101,14 @@ def read_hull_vtp(case_dir):
               piece.find("./Polys").findall("./DataArray")}
     offsets = np.fromstring(arrays["offsets"].text, sep=" ", dtype=np.int64)
     connectivity = np.fromstring(arrays["connectivity"].text, sep=" ", dtype=np.int64)
-    faces = [points[connectivity[start:end]]
-             for start, end in zip(np.concatenate(([0], offsets[:-1])), offsets)]
+    spans = list(zip(np.concatenate(([0], offsets[:-1])), offsets))
     values = np.fromstring(
         piece.find("./CellData/DataArray[@Name='p_rgh']").text, sep=" ")
-    if len(values) != len(faces):
-        raise ValueError(f"p_rgh 面值数量 {len(values)} 与面数 {len(faces)} 不一致")
+    if len(values) != len(spans):
+        raise ValueError(f"p_rgh 面值数量 {len(values)} 与面数 {len(spans)} 不一致")
+    if with_connectivity:
+        return points, [connectivity[start:end] for start, end in spans], values
+    faces = [points[connectivity[start:end]] for start, end in spans]
     return faces, values
 
 
