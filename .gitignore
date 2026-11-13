@@ -9,6 +9,7 @@ logs/
 *.npz
 vis/**/*.png
 vis/**/*.pdf
+/vis/kcs_bow_pressure/run_manifest_3d.json
 
 # Python
 __pycache__/
