@@ -1,100 +1,108 @@
 {
   "source": "docs/isoflops_model_complexity.md",
   "protocol": "单条目 kcs_fr026_normal_mesh、batch 1、float32、训练模式单次前向，输入与查询都是 stride 1；GFLOPs 由 torch.utils.flop_counter.FlopCounterMode 统计，CPU 融合注意力由 src/eval/flops.py 补齐",
-  "note": "主实验 7 个模型与两个算例的 GFLOPs 取标定表原值；APP+OFormer 消融组的 GFLOPs 取同一统计口径的既有结果（output/archive/pre_sampling_fix/app_oformer_*_flops.json），改动前后配置的模型结构未变",
+  "note": "双域输出 + Fourier add + lambda_hull = 1.0 口径下按同一统计口径重新标定；锚点为 APPSolver-v2 的 249.363 GFLOPs，7 个主实验模型实测 249.4–259.3 GFLOPs（相对锚点最大偏差 3.99%）",
   "training_token_protocol": "训练 token 总量 = token@stride1 × 训练条目数 × 100 epoch（主实验 190 × 100 = 19000 步）",
   "entries": {
     "appsolver_v2_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 214.27
+      "gflops": 249.363
     },
     "appsolver_oformer_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 215.95
+      "gflops": 251.409
     },
     "appsolver_v1_random_seed0_isoflops": {
       "tokens": 2048,
       "token_kind": "patch",
-      "gflops": 214.84
+      "gflops": 249.436
     },
     "gnot_random_seed0_isoflops": {
       "tokens": 123241,
       "token_kind": "point",
-      "gflops": 210.88
+      "gflops": 250.861
     },
     "upt_random_seed0_isoflops": {
       "tokens": 128,
       "token_kind": "latent",
-      "gflops": 218.2
+      "gflops": 257.136
     },
     "transolver_random_seed0_isoflops": {
       "tokens": 123241,
       "token_kind": "point",
-      "gflops": 218.99
+      "gflops": 259.31
     },
     "oformer_random_seed0_isoflops": {
       "tokens": 123241,
       "token_kind": "point",
-      "gflops": 218.3
+      "gflops": 253.046
     },
     "appsolver_oformer_uniform_partition_random_seed0_isoflops": {
       "tokens": 576,
       "token_kind": "patch",
-      "gflops": 215.9
+      "gflops": 251.356
     },
     "appsolver_oformer_learned_partition_random_seed0_isoflops": {
       "tokens": 576,
       "token_kind": "patch",
-      "gflops": 229.65
+      "gflops": 265.102
     },
     "appsolver_oformer_flow_only_random_seed0_isoflops": {
       "tokens": 561,
       "token_kind": "patch",
-      "gflops": 215.89
+      "gflops": 215.889
     },
     "appsolver_oformer_joint_flow_hull_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 251.41
+      "gflops": 251.409
     },
     "appsolver_oformer_conditioning_none_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 215.95
+      "gflops": 251.409
     },
     "appsolver_oformer_conditioning_adaln_zero_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 215.95
+      "gflops": 251.409
     },
     "appsolver_oformer_conditioning_fourier_add_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 215.95
+      "gflops": 251.409
     },
     "appsolver_oformer_conditioning_cond_token_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 215.95
+      "gflops": 251.41
     },
     "appsolver_oformer_conditioning_cond_xattn_random_seed0_isoflops": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": 230.01
+      "gflops": 267.771
     },
     "appsolver_transolver_random_seed0": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": null,
-      "gflops_status": "未标定：本轮没有对 APP+Transolver 的重标定配置运行前向计算量统计"
+      "gflops": 283.905
     },
     "appsolver_upt_random_seed0": {
       "tokens": 625,
       "token_kind": "patch",
-      "gflops": null,
-      "gflops_status": "未标定：本轮没有对 APP+UPT 的重标定配置运行前向计算量统计"
+      "gflops": 175.056
+    },
+    "appsolver_oformer_flow_with_hull_random_seed0_isoflops": {
+      "tokens": 625,
+      "token_kind": "patch",
+      "gflops": 215.949
+    },
+    "appsolver_oformer_conditioning_film_random_seed0_isoflops": {
+      "tokens": 625,
+      "token_kind": "patch",
+      "gflops": 251.409
     }
   }
 }
