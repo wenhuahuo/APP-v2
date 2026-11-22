@@ -2,6 +2,8 @@
 
 **Adaptive Patch Tokenization for Joint Operator Learning of Ship Flow and Hull Pressure**
 
+[![ShipBenchv2 on Hugging Face](https://img.shields.io/badge/Dataset-ShipBenchv2-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/datasets/wenhuahuo/ShipBenchv2)
+
 APPv2 is a research codebase for learning calm-water ship free-surface fields and wetted-hull pressure from geometry and operating conditions. Its primary model, **APP-OFormer**, combines APP adaptive patch tokenization with an OFormer backbone. APP converts dense free-surface and hull samples into compact geometry-aware tokens, while continuous coordinate decoders predict the five free-surface channels `eta`, `u`, `v`, `w`, and `p_rgh` together with wetted-surface `Cp`.
 
 APPv2 is the paper and project name. APP-OFormer is the main model and appears as `appsolver_oformer` in source and configuration paths. The repository also provides APPSolver-v2 under `configs/appsolver_v2/` as a separate APP-based model.
@@ -55,7 +57,7 @@ The entry points are the source scripts under `scripts/`. Run them directly from
 
 ### 2. Prepare ShipBenchv2
 
-Unpack the ShipBenchv2 samples and their `index.json` into **`dataset/shipbench/`**. Place the split-specific normalization files alongside the index. The training configurations expect this layout:
+Download the four archives and `SHA256SUMS` from [ShipBenchv2 on Hugging Face](https://huggingface.co/datasets/wenhuahuo/ShipBenchv2). Verify the checksums and extract the archives into `dataset/` as described in the dataset card. The archives include the index and split-specific normalization files. The training configurations expect this layout:
 
 ```text
 dataset/shipbench/
