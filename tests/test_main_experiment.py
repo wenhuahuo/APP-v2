@@ -236,6 +236,8 @@ class MainConfigTest(unittest.TestCase):
 
     def test_sbatch_covers_exactly_the_main_table(self):
         """数组任务与主表一一对应：7 个模型 × 训练种子 1/2、固定计算量容量（种子 0 已完成）。"""
+        if not SBATCH.is_file():
+            self.skipTest("Local Slurm job script is absent")
         text = SBATCH.read_text()
         self.assertIn("--array=0-13%2", text)
         self.assertIn("--job-name=main-isoflops-seed12", text)

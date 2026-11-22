@@ -13,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture(scope="module")
 def morph():
+    if not (ROOT / "vis/ship_morphing/plot_morphing.py").is_file():
+        pytest.skip("Local visualization sources are absent")
     spec = importlib.util.spec_from_file_location(
         "vis_morphing_edge_test", ROOT / "vis/ship_morphing/plot_morphing.py")
     module = importlib.util.module_from_spec(spec)

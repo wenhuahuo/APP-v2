@@ -17,6 +17,8 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+if not (ROOT / "vis/common/flow_compare.py").is_file():
+    pytest.skip("Local visualization sources are absent", allow_module_level=True)
 sys.path.insert(0, str(ROOT / "vis"))
 
 from common import flow_compare

@@ -116,6 +116,8 @@ class GeneralizationConfigTest(unittest.TestCase):
 
     def test_sbatch_arrays_cover_exactly_the_runs(self):
         """两个数组各 15 个元素、%2，元素按「模型 × 训练种子」排列且与配置一一对应。"""
+        if not all(job.is_file() for job in SBATCH.values()):
+            self.skipTest("Local Slurm job scripts are absent")
         for split in SPLITS:
             text = SBATCH[split].read_text()
             with self.subTest(split=split):

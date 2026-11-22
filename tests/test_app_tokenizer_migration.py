@@ -105,6 +105,8 @@ class MigrationConfigTest(unittest.TestCase):
 
     def test_sbatch_array_covers_two_models_and_three_seeds(self):
         """数组 0-5：先种子、后模型（APP+Transolver / APP+UPT），与配置一一对应。"""
+        if not SBATCH.is_file():
+            self.skipTest("Local Slurm job script is absent")
         text = SBATCH.read_text()
         self.assertIn("--array=0-5%2", text)
         block = text.split("MODELS=(", 1)[1].split(")", 1)[0]

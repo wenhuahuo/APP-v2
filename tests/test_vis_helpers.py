@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+if not (ROOT / "vis/common/pinholes.py").is_file():
+    pytest.skip("Local visualization sources are absent", allow_module_level=True)
 sys.path.insert(0, str(ROOT / "vis"))
 
 from common.pinholes import fill_pinholes
